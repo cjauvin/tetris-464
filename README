@@ -1,0 +1,7 @@
+Run with KickAssembler (http://theweb.dk/KickAssembler), and optionaly with x64 (VICE emu suite):
+
+$ java -jar KickAss.jar tetris.asm -execute x64
+
+(will autoload/start)
+
+This is my first C=64 asm experiment, and it's currently in a *very early* dev stage.. more to come soon!
