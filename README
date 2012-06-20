@@ -1,4 +1,4 @@
-Run with KickAssembler (http://theweb.dk/KickAssembler), and optionaly with x64 (VICE emu suite):
+Run with KickAssembler (http://theweb.dk/KickAssembler), and optionally with x64 (VICE emu suite):
 
 $ java -jar KickAss.jar tetris.asm -execute x64
 
