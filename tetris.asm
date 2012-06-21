@@ -61,11 +61,11 @@ start:  jsr $e544   // clear screen
         lda #0
         sta vb0 // x: 0 to 3 (rows)
 
-new_row:    lda #0
+row4:       lda #0
             sta vb1 // y: 0 to 3 (cols)
 
                 // target cell address: 1024 + (pos[0] * 40) + pos[1]
-do_row:         lda #0 // vw0 <- 1024
+col4:           lda #0 // vw0 <- 1024
                 sta vw1
                 lda #4
                 sta vw0+1
@@ -106,13 +106,13 @@ off:            ldy #0
                 iny
                 sty vb1
                 cpy #4
-                bne do_row
+                bne col4
 
            ldx vb0
            inx
            stx vb0
            cpx #4
-           bne new_row
+           bne row4
                 
         jmp *
 
