@@ -11,16 +11,18 @@
 .pc = $1000 "Tetrominoes data"
         // 'O' piece
         .byte 1 // number of states
-        .byte 0,0,0,0,0,0,1,1,0,0,1,1,0,0,0,0
+        //.byte 0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0
+        .byte 1,0,1,0,0,1,0,1,1,0,1,0,0,1,0,1
                 
 .pc = $2000 "Variables"
-pos:    .byte 0, 17 // starting pos: top center
+pos:    .byte 0, 18 // starting pos: top center
 cntr:   .byte 0     // multi-purpose counter
-vb0:    .byte 0 // multi-purpose vars (byte)
+sec60th:.byte 0     // sec 60th counter (when reaching 60, a second has passed)
+vb0:    .byte 0     // multi-purpose vars (byte)
 vb1:    .byte 0 
 vb2:    .byte 0 
 vb3:    .byte 0 
-vw0:    .word 0 // word vars (16 bits)
+vw0:    .word 0     // word vars (16 bits)
 vw1:    .word 0 
 vw2:    .word 0 
 vw3:    .word 0 
@@ -28,6 +30,23 @@ vw3:    .word 0
 .import source "math.asm"
 
 ///////////////////////////////////////////////////////
+
+/*
+   Interrupt handler
+*/
+interrupt_handler:
+        lda sec60th
+        cmp #61
+        bne continue
+        jsr erase_piece
+        inc pos
+        jsr draw_piece
+        //inc $d020 // change border color
+        lda #0          // reset sec60th
+        sta sec60th
+continue:
+        inc sec60th
+        jmp $ea31   
         
 /*
    Draw left and right grid sides
@@ -59,11 +78,11 @@ draw_piece:
         lda #0
         sta vb0 // i: 0 to 3 (piece rows)
 
-prow:       lda #0
+!prow:      lda #0
             sta vb1 // j: 0 to 3 (piece cols)
 
                 // target cell address: 1024 + (pos[0]+i * 40) + pos[1]+j
-pcol:           lda #0 // vw0 <- 1024
+!pcol:          lda #0 // vw0 <- 1024
                 sta vw0
                 lda #4
                 sta vw0+1
@@ -104,19 +123,82 @@ off:            ldy #0
                 iny
                 sty vb1
                 cpy #4
-                bne pcol
+                bne !pcol-
 
            ldx vb0
            inx
            stx vb0
            cpx #4
-           bne prow
+           bne !prow-
 
         rts
 
+/*
+   Remove piece at pos
+*/
+erase_piece:
+        lda #0
+        sta cntr // counter from 0 to 15
+
+        lda #0
+        sta vb0 // i: 0 to 3 (piece rows)
+
+!prow:      lda #0
+            sta vb1 // j: 0 to 3 (piece cols)
+
+                // target cell address: 1024 + (pos[0]+i * 40) + pos[1]+j
+!pcol:          lda #0 // vw0 <- 1024
+                sta vw0
+                lda #4
+                sta vw0+1
+
+                lda pos // vw1 <- pos[0][i] * 40
+                clc
+                adc vb0 // i
+                ldx #40
+                jsr mult
+                stx vw1  
+                sta vw1+1
+
+                lda pos+1 // vw2 <- pos[1][j]
+                clc
+                adc vb1 // j
+                sta vw2
+                lda #0
+                sta vw2+1
+
+                jsr add3 // vw3 = vw0 + vw1 + vw2
+        
+                lda vw3
+                sta $fb
+                lda vw3+1
+                sta $fc
+
+                lda #32 // off
+                ldy cntr
+                ldx $1001,y
+                sta ($fb),y
+
+                inc cntr
+        
+                ldy vb1
+                iny
+                sty vb1
+                cpy #4
+                bne !pcol-
+
+           ldx vb0
+           inx
+           stx vb0
+           cpx #4
+           bne !prow-
+
+        rts
+        
 /////////////////////////////////////////////        
 
-main:   jsr $e544   // clear screen
+main:
+        jsr $e544   // clear screen
 
         // draw 3 parts of grid outline:        
 
@@ -145,8 +227,14 @@ main:   jsr $e544   // clear screen
         // start
         
         jsr draw_piece
-        inc pos
-        jsr draw_piece
 
+        // set interrupt handler
+        sei       
+        lda #<interrupt_handler
+        sta 788   
+        lda #>interrupt_handler
+        sta 789
+        cli       
+        
         jmp * // infinite loop
-
+        
