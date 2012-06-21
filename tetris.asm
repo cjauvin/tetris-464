@@ -37,14 +37,14 @@ vw3:    .word 0
 interrupt_handler:
         lda sec60th
         cmp #61
-        bne continue
+        bne !continue+
         jsr erase_piece
         inc pos
         jsr draw_piece
         //inc $d020 // change border color
         lda #0          // reset sec60th
         sta sec60th
-continue:
+!continue:
         inc sec60th
         jmp $ea31   
         
