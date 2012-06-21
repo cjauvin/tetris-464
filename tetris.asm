@@ -145,6 +145,8 @@ main:   jsr $e544   // clear screen
         // start
         
         jsr draw_piece
+        inc pos
+        jsr draw_piece
 
         jmp * // infinite loop
 
