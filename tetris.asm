@@ -1,3 +1,4 @@
+// test
 :BasicUpstart2(start) // autostart macro
 
 .pc = $2000 "Variables"
