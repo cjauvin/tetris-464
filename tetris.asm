@@ -21,7 +21,6 @@ pos:    .byte 0, 18 // starting pos: top center
 cntr:   .byte 0     // multi-purpose counter
 timer1: .byte 0, 60     // val, target
 timer2: .byte 0, 10
-sec60th:.byte 0     // sec 60th counter (when reaching 60, a second has passed)
 vb0:    .byte 0     // multi-purpose vars (byte)
 vb1:    .byte 0 
 vb2:    .byte 0 
@@ -110,16 +109,16 @@ grid_outline_side:
 */
 draw_piece:
 
-        sta vb2 // acc -> vb2 -> 0:erase, 1:draw
+        sta vb0 // acc -> vb0 -> 0:erase, 1:draw
         
         lda #0
         sta cntr // counter from 0 to 15
 
         lda #0
-        sta vb0 // i: 0 to 3 (piece rows)
+        sta vb1 // i: 0 to 3 (piece rows)
 
 !prow:      lda #0
-            sta vb1 // j: 0 to 3 (piece cols)
+            sta vb2 // j: 0 to 3 (piece cols)
 
                 // target cell address: 1024 + (pos[0]+i * 40) + pos[1]+j
 !pcol:          lda #0 // vw0 <- 1024
@@ -129,7 +128,7 @@ draw_piece:
 
                 lda pos // vw1 <- pos[0][i] * 40
                 clc
-                adc vb0 // i
+                adc vb1 // i
                 ldx #40
                 jsr mult
                 stx vw1  
@@ -137,7 +136,7 @@ draw_piece:
 
                 lda pos+1 // vw2 <- pos[1][j]
                 clc
-                adc vb1 // j
+                adc vb2 // j
                 sta vw2
                 lda #0
                 sta vw2+1
@@ -149,7 +148,7 @@ draw_piece:
                 lda vw3+1
                 sta $fc
 
-                lda vb2
+                lda vb0
                 beq erase
 draw:   
                 lda #32 // off
@@ -169,15 +168,15 @@ erase:
                 sta ($fb),y                
 
 !continue:       
-                ldy vb1
+                ldy vb2
                 iny
-                sty vb1
+                sty vb2
                 cpy #4
                 bne !pcol-
 
-           ldx vb0
+           ldx vb1
            inx
-           stx vb0
+           stx vb1
            cpx #4
            bne !prow-
 
