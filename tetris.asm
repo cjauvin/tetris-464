@@ -1,5 +1,6 @@
 /*
-   tetris.asm (c=64)
+   tetris.asm (C=64 + KickAssembler)
+   =================================
    June 2012
    Christian Jauvin
    cjauvin@gmail.com
@@ -13,10 +14,13 @@
         .byte 1 // number of states
         //.byte 0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0
         .byte 1,0,1,0,0,1,0,1,1,0,1,0,0,1,0,1
+        //.byte 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
                 
 .pc = $2000 "Variables"
 pos:    .byte 0, 18 // starting pos: top center
 cntr:   .byte 0     // multi-purpose counter
+timer1: .byte 0, 60     // val, target
+timer2: .byte 0, 10
 sec60th:.byte 0     // sec 60th counter (when reaching 60, a second has passed)
 vb0:    .byte 0     // multi-purpose vars (byte)
 vb1:    .byte 0 
@@ -35,17 +39,48 @@ vw3:    .word 0
    Interrupt handler
 */
 interrupt_handler:
-        lda sec60th
-        cmp #61
-        bne !continue+
-        jsr erase_piece
-        inc pos
+        // animate piece fall
+        lda timer1
+        cmp timer1+1
+        bne !wait+
+        lda #0
         jsr draw_piece
-        //inc $d020 // change border color
-        lda #0          // reset sec60th
-        sta sec60th
-!continue:
-        inc sec60th
+        inc pos
+        lda #1
+        jsr draw_piece
+        lda #0        
+        sta timer1
+        jmp keyboard_input
+!wait:
+        inc timer1
+keyboard_input: 
+        lda timer2
+        cmp timer2+1
+        bne !wait+
+        lda #0
+        sta timer2
+        jsr $ffe4
+        beq !return+
+test_left:      
+        cmp #$41      // 'A' key
+        bne test_right
+        lda #0
+        jsr draw_piece
+        dec pos+1       // piece left
+        lda #1
+        jsr draw_piece
+test_right:
+        cmp #$44      // 'D' key
+        bne !return+
+        lda #0
+        jsr draw_piece
+        inc pos+1       // piece right
+        lda #1
+        jsr draw_piece        
+        jmp !return+
+!wait:
+        inc timer2
+!return:
         jmp $ea31   
         
 /*
@@ -70,8 +105,13 @@ grid_outline_side:
 
 /*
    Draw piece at pos
+   acc=1 -> draw
+   acc=0 -> erase
 */
 draw_piece:
+
+        sta vb2 // acc -> vb2 -> 0:erase, 1:draw
+        
         lda #0
         sta cntr // counter from 0 to 15
 
@@ -109,6 +149,9 @@ draw_piece:
                 lda vw3+1
                 sta $fc
 
+                lda vb2
+                beq erase
+draw:   
                 lda #32 // off
                 ldy cntr
                 ldx $1001,y
@@ -118,69 +161,14 @@ off:            ldy #0
                 sta ($fb),y
 
                 inc cntr
-        
-                ldy vb1
-                iny
-                sty vb1
-                cpy #4
-                bne !pcol-
+                jmp !continue+
 
-           ldx vb0
-           inx
-           stx vb0
-           cpx #4
-           bne !prow-
-
-        rts
-
-/*
-   Remove piece at pos
-*/
-erase_piece:
-        lda #0
-        sta cntr // counter from 0 to 15
-
-        lda #0
-        sta vb0 // i: 0 to 3 (piece rows)
-
-!prow:      lda #0
-            sta vb1 // j: 0 to 3 (piece cols)
-
-                // target cell address: 1024 + (pos[0]+i * 40) + pos[1]+j
-!pcol:          lda #0 // vw0 <- 1024
-                sta vw0
-                lda #4
-                sta vw0+1
-
-                lda pos // vw1 <- pos[0][i] * 40
-                clc
-                adc vb0 // i
-                ldx #40
-                jsr mult
-                stx vw1  
-                sta vw1+1
-
-                lda pos+1 // vw2 <- pos[1][j]
-                clc
-                adc vb1 // j
-                sta vw2
-                lda #0
-                sta vw2+1
-
-                jsr add3 // vw3 = vw0 + vw1 + vw2
-        
-                lda vw3
-                sta $fb
-                lda vw3+1
-                sta $fc
-
+erase:
                 lda #32 // off
-                ldy cntr
-                ldx $1001,y
-                sta ($fb),y
+                ldy #0
+                sta ($fb),y                
 
-                inc cntr
-        
+!continue:       
                 ldy vb1
                 iny
                 sty vb1
@@ -200,6 +188,9 @@ erase_piece:
 main:
         jsr $e544   // clear screen
 
+        lda #128
+        sta $028a // set key autorepeat
+        
         // draw 3 parts of grid outline:        
 
         // (1) bottom
@@ -225,7 +216,8 @@ main:
         jsr grid_outline_side
 
         // start
-        
+
+        lda #1
         jsr draw_piece
 
         // set interrupt handler
