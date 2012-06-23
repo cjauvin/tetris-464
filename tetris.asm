@@ -25,6 +25,8 @@ pos_ahead: .word 0
 cntr:   .byte 0     // multi-purpose counter
 timer1: .byte 0, 30     // val, target
 timer2: .byte 0, 5
+falling: .byte 0
+moving:  .byte 0
 vb0:    .byte 0     // multi-purpose vars (byte)
 vb1:    .byte 0 
 vb2:    .byte 0 
@@ -44,6 +46,12 @@ interrupt_handler:
         lda timer1
         cmp timer1+1
         bne !wait+
+        lda #1
+        sta falling
+        lda #0
+        sta timer1
+        jmp !return+
+/*       
         lda #0
         jsr draw_piece
         inc pos
@@ -52,8 +60,12 @@ interrupt_handler:
         lda #0        
         sta timer1
         jmp keyboard_input
+*/        
 !wait:
         inc timer1
+!return:
+        jmp $ea31
+/*
 keyboard_input: 
         lda timer2
         cmp timer2+1
@@ -88,7 +100,8 @@ test_right:
 !wait:
         inc timer2
 !return:
-        jmp $ea31 // $ea31=full, $ea81=pop registers only 
+        jmp $ea31 // $ea31=full, $ea81=pop registers only
+*/        
         
 /*
    Draw left and right grid sides
@@ -358,6 +371,18 @@ main:
         lda #>interrupt_handler
         sta 789
         cli       
+
+main_loop:
+        lda falling
+        bne !main_loop-
+        lda #0
+        jsr draw_piece
+        inc pos
+        lda #1
+        jsr draw_piece
+        lda #0
+        sta falling
+        jmp main_loop
         
-        jmp * // infinite loop
+        //jmp * // infinite loop
         
