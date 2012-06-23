@@ -1,8 +1,8 @@
 /*
    tetris.asm (C=64 + KickAssembler)
    =================================
-   June 2012
    Christian Jauvin
+   June 2012
    cjauvin@gmail.com
    http://christianjauv.in
 */
@@ -17,30 +17,32 @@
         .byte 0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0
         //.byte 1,0,1,0,0,1,0,1,1,0,1,0,0,1,0,1
         //.byte 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+        //.byte 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+        //.byte 0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0
                 
 .pc = $2000 "Variables"
-fixed_cells: .fill 1000, 32
-pos:    .byte 0, 18 // starting pos: top center
-pos_ahead: .word 0
-td_offset:   .byte 0     // tetromino data offset
-timer1: .byte 0, 30     // val, target
-timer2: .byte 0, 5
-is_falling: .byte 0    
-is_moving:  .byte 0    // 1=left, 2=right, 3=..
-i:      .byte 0
-j:      .byte 0        
-draw_mode:    .byte 0
-gca_mode1:     .byte 0
-gca_mode2:     .byte 0
-var_add0:    .word 0     // word vars (16 bits)
-var_add1:    .word 0 
-var_add2:    .word 0 
-var_add3:    .word 0
+fixed_cells:    .fill 1000, 32
+pos:            .byte 0, 18 // starting pos: top center
+pos_ahead:      .word 0
+td_offset:      .byte 0     // tetromino data offset
+timer1:         .byte 0, 30 // val, target
+timer2:         .byte 0, 5
+is_falling:     .byte 0    
+is_moving:      .byte 0     // 1=left, 2=right, 3=..
+i:              .byte 0
+j:              .byte 0        
+draw_mode:      .byte 0
+gca_mode1:      .byte 0
+gca_mode2:      .byte 0
+var_add0:       .word 0 
+var_add1:       .word 0 
+var_add2:       .word 0 
+var_add3:       .word 0
         
 ///////////////////////////////////////////////////////
 
 /*
-   Interrupt handler
+   Interrupt handler: handle timers and set moving flags 
 */
 interrupt_handler:
         // animate piece fall
@@ -109,24 +111,21 @@ grid_outline_side:
     x=1: use pos_ahead   
 */
 get_cell_addr:
-
         sta gca_mode1
         stx gca_mode2
+        lda gca_mode1
         bne !use_fixed+
-
 !use_video:      
         lda #0 // var_add0 <- 1024
         sta var_add0
         lda #4
         sta var_add0+1
         jmp !continue+
-
 !use_fixed:
         lda #<fixed_cells // var_add0 <- fixed_cells
         sta var_add0
         lda #>fixed_cells
-        sta var_add0+1
-                
+        sta var_add0+1                
 !continue:
         lda gca_mode2
         bne !use_ahead+
@@ -141,7 +140,6 @@ get_cell_addr:
         jsr mult
         stx var_add1  
         sta var_add1+1
-
         lda gca_mode2
         bne !use_ahead+
         lda pos+1
@@ -154,9 +152,7 @@ get_cell_addr:
         sta var_add2
         lda #0
         sta var_add2+1
-
         jsr add3 // var_add3 = var_add0 + var_add1 + var_add2
-
         lda gca_mode1
         beq !use_video+
         bne !use_fixed+
@@ -199,11 +195,12 @@ draw_piece:
         lda #0
         sta j // 0 to 3 (piece cols)                
 !pcol:
-        ldx #0 // use pos
         lda #0 // use video
-        jsr get_cell_addr // -> $fb/$fc
         ldx #0 // use pos
+        jsr get_cell_addr // -> $fb/$fc
+
         lda #1 // use fixed_cells
+        ldx #0 // use pos
         jsr get_cell_addr // -> $fd/$fe
 
         lda draw_mode
@@ -212,7 +209,7 @@ draw:
         ldy td_offset
         ldx $1001,y
         beq erase
-        lda #160 // on
+        lda #160 // cell on
         ldy #0
         sta ($fb),y
         jmp !continue+
@@ -221,7 +218,7 @@ erase:
         lda ($fd),y
         cmp #160
         beq !continue+                        
-        lda #32 // off
+        lda #32 // cell off
         sta ($fb),y                
 !continue:       
         inc td_offset
