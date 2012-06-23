@@ -24,28 +24,28 @@ end:    txa
 	rts
 
 /*
-   16-bit addition: vw2 = vw0 + vw1
+   16-bit addition: var_add2 = var_add0 + var_add1
 */
 add2:   clc
-        lda vw0
-        adc vw1
-        sta vw2
-        lda vw0+1
-        adc vw1+1
-        sta vw2+1
+        lda var_add0
+        adc var_add1
+        sta var_add2
+        lda var_add0+1
+        adc var_add1+1
+        sta var_add2+1
         rts
 /*
-   16-bit addition: vw3 = vw0 + vw1 + vw2
+   16-bit addition: var_add3 = var_add0 + var_add1 + var_add2
 */
 add3:   clc
-        lda vw0
-        adc vw1
-        adc vw2
-        sta vw3
-        lda vw0+1
-        adc vw1+1
-        adc vw2+1
-        sta vw3+1
+        lda var_add0
+        adc var_add1
+        adc var_add2
+        sta var_add3
+        lda var_add0+1
+        adc var_add1+1
+        adc var_add2+1
+        sta var_add3+1
         rts
         
         

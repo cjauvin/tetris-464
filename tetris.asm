@@ -19,22 +19,23 @@
         //.byte 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
                 
 .pc = $2000 "Variables"
-fixed: .fill 1000, 32
+fixed_cells: .fill 1000, 32
 pos:    .byte 0, 18 // starting pos: top center
 pos_ahead: .word 0
-cntr:   .byte 0     // multi-purpose counter
+td_offset:   .byte 0     // tetromino data offset
 timer1: .byte 0, 30     // val, target
 timer2: .byte 0, 5
-falling: .byte 0    
-moving:  .byte 0    // 1=left, 2=right, 3=..
-vb0:    .byte 0     // multi-purpose vars (byte)
-vb1:    .byte 0 
-vb2:    .byte 0 
-vb3:    .byte 0 
-vw0:    .word 0     // word vars (16 bits)
-vw1:    .word 0 
-vw2:    .word 0 
-vw3:    .word 0
+is_falling: .byte 0    
+is_moving:  .byte 0    // 1=left, 2=right, 3=..
+i:      .byte 0
+j:      .byte 0        
+draw_mode:    .byte 0
+gca_mode1:     .byte 0
+gca_mode2:     .byte 0
+var_add0:    .word 0     // word vars (16 bits)
+var_add1:    .word 0 
+var_add2:    .word 0 
+var_add3:    .word 0
         
 ///////////////////////////////////////////////////////
 
@@ -47,7 +48,7 @@ interrupt_handler:
         cmp timer1+1
         bne !wait+
         lda #1
-        sta falling
+        sta is_falling
         lda #0
         sta timer1
         jmp !return+
@@ -66,13 +67,13 @@ test_left:
         cmp #$41      // 'A' key
         bne test_right
         lda #1
-        sta moving
+        sta is_moving
         jmp !return+
 test_right:
         cmp #$44      // 'D' key
         bne !return+
         lda #2
-        sta moving
+        sta is_moving
         lda #2        
         jmp !return+
 !wait:
@@ -101,36 +102,83 @@ grid_outline_side:
         rts
 
 /*
-   
+    target cell address: 1024|fixed_cells + (pos[0]+i * 40) + pos[1]+j
+    acc=0: use video, store in $fb
+    acc=1: use fixed_cells, store in $fd
+    x=0: use pos
+    x=1: use pos_ahead   
 */
 get_cell_addr:
-        lda #0 // vw0 <- 1024
-        sta vw0
-        lda #4
-        sta vw0+1
 
-        lda pos // vw1 <- pos[0][i] * 40
+        sta gca_mode1
+        stx gca_mode2
+        bne !use_fixed+
+
+!use_video:      
+        lda #0 // var_add0 <- 1024
+        sta var_add0
+        lda #4
+        sta var_add0+1
+        jmp !continue+
+
+!use_fixed:
+        lda #<fixed_cells // var_add0 <- fixed_cells
+        sta var_add0
+        lda #>fixed_cells
+        sta var_add0+1
+                
+!continue:
+        lda gca_mode2
+        bne !use_ahead+
+        lda pos 
+        jmp !continue+
+!use_ahead:
+        lda pos_ahead
+!continue:        
         clc
-        adc vb1 // i
+        adc i 
         ldx #40
         jsr mult
-        stx vw1  
-        sta vw1+1
+        stx var_add1  
+        sta var_add1+1
 
-        lda pos+1 // vw2 <- pos[1][j]
+        lda gca_mode2
+        bne !use_ahead+
+        lda pos+1
+        jmp !continue+
+!use_ahead:
+        lda pos_ahead+1
+!continue:                
         clc
-        adc vb2 // j
-        sta vw2
+        adc j
+        sta var_add2
         lda #0
-        sta vw2+1
+        sta var_add2+1
 
-        jsr add3 // vw3 = vw0 + vw1 + vw2
+        jsr add3 // var_add3 = var_add0 + var_add1 + var_add2
 
-        lda vw3
+        lda gca_mode1
+        beq !use_video+
+        bne !use_fixed+
+!use_video:
+        lda var_add3
         sta $fb
-        lda vw3+1
+        jmp !continue+
+!use_fixed:
+        lda var_add3
+        sta $fd
+!continue:
+        lda gca_mode1
+        beq !use_video+
+        bne !use_fixed+
+!use_video:
+        lda var_add3+1
         sta $fc
-
+        jmp !return+
+!use_fixed:
+        lda var_add3+1
+        sta $fe
+!return:
         rts
         
 /*
@@ -140,52 +188,54 @@ get_cell_addr:
 */
 draw_piece:
 
-        sta vb0 // acc -> vb0 -> 0:erase, 1:draw
+        sta draw_mode // 0:erase, 1:draw
         
         lda #0
-        sta cntr // counter from 0 to 15
+        sta td_offset // from 0 to 15
 
         lda #0
-        sta vb1 // i: 0 to 3 (piece rows)
-
-!prow:      lda #0
-            sta vb2 // j: 0 to 3 (piece cols)
-
-                // target cell address: 1024 + (pos[0]+i * 40) + pos[1]+j
+        sta i // 0 to 3 (piece rows)
+!prow:
+        lda #0
+        sta j // 0 to 3 (piece cols)                
 !pcol:
-                jsr get_cell_addr
-        
-                lda vb0
-                beq erase
+        ldx #0 // use pos
+        lda #0 // use video
+        jsr get_cell_addr // -> $fb/$fc
+        ldx #0 // use pos
+        lda #1 // use fixed_cells
+        jsr get_cell_addr // -> $fd/$fe
+
+        lda draw_mode
+        beq erase
 draw:   
-                lda #32 // off
-                ldy cntr
-                ldx $1001,y
-                beq off
-                lda #160 // on
-off:            ldy #0
-                sta ($fb),y
-
-                inc cntr
-                jmp !continue+
-
+        ldy td_offset
+        ldx $1001,y
+        beq erase
+        lda #160 // on
+        ldy #0
+        sta ($fb),y
+        jmp !continue+
 erase:
-                lda #32 // off
-                ldy #0
-                sta ($fb),y                
-
+        ldy #0
+        lda ($fd),y
+        cmp #160
+        beq !continue+                        
+        lda #32 // off
+        sta ($fb),y                
 !continue:       
-                ldy vb2
-                iny
-                sty vb2
-                cpy #4
-                bne !pcol-
+        inc td_offset
+        ldy j
+        iny
+        sty j
+        cpy #4
+        bne !pcol-
 
-           ldx vb1
-           inx
-           stx vb1
-           cpx #4
-           bne !prow-
+        ldx i
+        inx
+        stx i
+        cpx #4
+        bne !prow-
 
         rts
 
@@ -218,67 +268,43 @@ right:  inc pos_ahead+1
        
 !continue:
         lda #0
-        sta cntr // counter from 0 to 15
+        sta td_offset // from 0 to 15
 
         lda #0
-        sta vb1 // i: 0 to 3 (piece rows)
+        sta i // 0 to 3 (piece rows)
 
-!prow:      lda #0
-            sta vb2 // j: 0 to 3 (piece cols)
+!prow:
+        lda #0
+        sta j // 0 to 3 (piece cols)
 
-                // target cell address: fixed + (pos_ahead[0]+i * 40) + pos_ahead[1]+j
-!pcol:        
-                lda #<fixed // vw0 <- fixed
-                sta vw0
-                lda #>fixed
-                sta vw0+1
+!pcol:
+        lda #1 // use fixed 
+        ldx #1 // use pos ahead
+        jsr get_cell_addr // -> $fd/$fe
 
-                lda pos_ahead // vw1 <- pos_ahead[0][i] * 40
-                clc
-                adc vb1 // i
-                ldx #40
-
-                jsr mult
-                stx vw1  
-                sta vw1+1
-
-                lda pos_ahead+1 // vw2 <- pos_ahead[1][j]
-                clc
-                adc vb2 // j
-                sta vw2
-                lda #0
-                sta vw2+1
-
-                jsr add3 // vw3 = vw0 + vw1 + vw2
-
-                lda vw3
-                sta $fb
-                lda vw3+1
-                sta $fc
-
-                ldy #0
-                lda ($fb),y
-                cmp #32
-                beq !continue+
-                ldy cntr
-                ldx $1001,y
-                beq !continue+
-                lda #0 // collision detected
-                rts
+        ldy #0
+        lda ($fd),y
+        cmp #32
+        beq !continue+
+        ldy td_offset
+        ldx $1001,y
+        beq !continue+
+        lda #0 // collision detected
+        rts
 
 !continue:
-                inc cntr        
-                ldy vb2
-                iny
-                sty vb2
-                cpy #4
-                bne !pcol-
+        inc td_offset        
+        ldy j
+        iny
+        sty j
+        cpy #4
+        bne !pcol-
 
-           ldx vb1
-           inx
-           stx vb1
-           cpx #4
-           bne !prow-
+        ldx i
+        inx
+        stx i
+        cpx #4
+        bne !prow-
 
         lda #1 // no collision found
         rts
@@ -340,10 +366,10 @@ main:
         cli       
         
 main_loop:
-        lda falling
+        lda is_falling
         cmp #1
         beq do_fall
-        lda moving
+        lda is_moving
         cmp #1
         beq do_left
         cmp #2
@@ -356,7 +382,7 @@ do_fall:
         lda #1
         jsr draw_piece
         lda #0
-        sta falling
+        sta is_falling
         jmp main_loop        
 do_left:
         lda #1
@@ -368,7 +394,7 @@ do_left:
         lda #1
         jsr draw_piece
         lda #0
-        sta moving
+        sta is_moving
         jmp main_loop
 do_right:
         lda #2
@@ -380,6 +406,6 @@ do_right:
         lda #1
         jsr draw_piece
         lda #0
-        sta moving
+        sta is_moving
         jmp main_loop
         
