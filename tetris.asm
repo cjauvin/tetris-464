@@ -25,8 +25,8 @@ pos_ahead: .word 0
 cntr:   .byte 0     // multi-purpose counter
 timer1: .byte 0, 30     // val, target
 timer2: .byte 0, 5
-falling: .byte 0
-moving:  .byte 0
+falling: .byte 0    
+moving:  .byte 0    // 1=left, 2=right, 3=..
 vb0:    .byte 0     // multi-purpose vars (byte)
 vb1:    .byte 0 
 vb2:    .byte 0 
@@ -51,21 +51,9 @@ interrupt_handler:
         lda #0
         sta timer1
         jmp !return+
-/*       
-        lda #0
-        jsr draw_piece
-        inc pos
-        lda #1
-        jsr draw_piece
-        lda #0        
-        sta timer1
         jmp keyboard_input
-*/        
 !wait:
         inc timer1
-!return:
-        jmp $ea31
-/*
 keyboard_input: 
         lda timer2
         cmp timer2+1
@@ -78,30 +66,19 @@ test_left:
         cmp #$41      // 'A' key
         bne test_right
         lda #1
-        jsr can_move // can move left?
-        //bne test_right
-        lda #0
-        jsr draw_piece
-        dec pos+1       // piece left
-        lda #1
-        jsr draw_piece
+        sta moving
+        jmp !return+
 test_right:
         cmp #$44      // 'D' key
         bne !return+
         lda #2
-        jsr can_move // can move right?
-        //bne test_right
-        lda #0
-        jsr draw_piece
-        inc pos+1       // piece right
-        lda #1
-        jsr draw_piece        
+        sta moving
+        lda #2        
         jmp !return+
 !wait:
         inc timer2
 !return:
         jmp $ea31 // $ea31=full, $ea81=pop registers only
-*/        
         
 /*
    Draw left and right grid sides
@@ -216,7 +193,7 @@ erase:
    Input:  
       acc=0: down, acc=1: left, acc=2: right
    Output:
-      acc=0: no, acc=1: yes
+      acc=1: yes, acc=0: no
 */
 can_move:
 
@@ -240,7 +217,6 @@ right:  inc pos_ahead+1
         jmp !continue+
        
 !continue:
-
         lda #0
         sta cntr // counter from 0 to 15
 
@@ -257,26 +233,14 @@ right:  inc pos_ahead+1
                 lda #>fixed
                 sta vw0+1
 
-
                 lda pos_ahead // vw1 <- pos_ahead[0][i] * 40
                 clc
                 adc vb1 // i
                 ldx #40
 
-                lda #1
-                sta vb3
-!loop:
-                lda vb3
-                cmp #255
-                beq !continue+
-                inc vb3
-                jmp !loop-
-        
-                //jsr mult
-                //stx vw1  
-                //sta vw1+1
-
-/*        
+                jsr mult
+                stx vw1  
+                sta vw1+1
 
                 lda pos_ahead+1 // vw2 <- pos_ahead[1][j]
                 clc
@@ -299,9 +263,8 @@ right:  inc pos_ahead+1
                 ldy cntr
                 ldx $1001,y
                 beq !continue+
-                lda #1 // collision detected
+                lda #0 // collision detected
                 rts
-*/
 
 !continue:
                 inc cntr        
@@ -317,7 +280,7 @@ right:  inc pos_ahead+1
            cpx #4
            bne !prow-
 
-        lda #0 // no collision found
+        lda #1 // no collision found
         rts
                 
 /////////////////////////////////////////////        
@@ -353,14 +316,18 @@ main:
         jsr grid_outline_side
         
         // (3) right
-        lda #$41    // $fb -> $0442 = 1024 + (1 * 40) + 14 + 11
+        lda #$41    // $fb -> $0442 = 1024 + (1 * 40) + 25
         sta $fb
         lda #$04
         sta $fc        
         jsr grid_outline_side
 
-        // start
-
+        lda #$41    // $fb -> $2041 = 8192 + (1 * 40) + 25
+        sta $fb
+        lda #$20
+        sta $fc        
+        jsr grid_outline_side
+        
         lda #1
         jsr draw_piece
 
@@ -371,10 +338,18 @@ main:
         lda #>interrupt_handler
         sta 789
         cli       
-
+        
 main_loop:
         lda falling
-        bne !main_loop-
+        cmp #1
+        beq do_fall
+        lda moving
+        cmp #1
+        beq do_left
+        cmp #2
+        beq do_right
+        jmp main_loop
+do_fall:
         lda #0
         jsr draw_piece
         inc pos
@@ -382,7 +357,29 @@ main_loop:
         jsr draw_piece
         lda #0
         sta falling
+        jmp main_loop        
+do_left:
+        lda #1
+        jsr can_move // can move left?
+        beq main_loop
+        lda #0
+        jsr draw_piece
+        dec pos+1       // piece left
+        lda #1
+        jsr draw_piece
+        lda #0
+        sta moving
         jmp main_loop
-        
-        //jmp * // infinite loop
+do_right:
+        lda #2
+        jsr can_move // can move right?
+        beq main_loop
+        lda #0
+        jsr draw_piece
+        inc pos+1       // piece right
+        lda #1
+        jsr draw_piece
+        lda #0
+        sta moving
+        jmp main_loop
         
