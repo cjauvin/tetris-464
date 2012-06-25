@@ -11,25 +11,26 @@
 
 .import source "math.asm"
 
-.pc = $1000 "Tetrominoes data"
-        // 'O' piece
+.pc = $1000 "Piece data"
+piece_o:        
         .byte 1 // number of states
-        //.byte 0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0
-        //.byte 1,0,1,0,0,1,0,1,1,0,1,0,0,1,0,1
-        //.byte 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
-        //.byte 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+        .byte 0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0
+piece_i:        
+        .byte 2
         .byte 0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0
-                
+        .byte 0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0
+        
 .pc = $2000 "Variables"
-pos:            .byte 0, 18 // starting pos: top center
+pos:            .byte 0, 18 // starting pos: top center        
 pos_ahead:      .word 0     // move lookahead
-i:              .byte 0     // tetromino data row
-j:              .byte 0     // td col   
-k:              .byte 0     // td offset
+piece_state:    .byte 0
+i:              .byte 0     // piece data row
+j:              .byte 0     // pd col   
+k:              .byte 0     // pd offset
 timer1:         .byte 0, 30 // val, target
 timer2:         .byte 0, 5  // val, target
 is_falling:     .byte 0     // bool
-moving_dir:      .byte 0    // 0:none, 1:left, 2:right
+moving_dir:     .byte 0    // 0:none, 1:left, 2:right
 draw_mode:      .byte 0     // 0:erase, 1:draw, 
 var_add0:       .word 0     // used by add2 and add3 
 var_add1:       .word 0 
@@ -140,6 +141,17 @@ get_cell_addr:
         lda var_add3+1
         sta $fc
         rts
+
+get_piece_cell_offset:
+        lda piece_state
+        ldx #16
+        jsr mult
+        inx
+        txa
+        clc
+        adc k
+        tay
+        rts        
         
 /*
    Draw piece at pos
@@ -160,8 +172,8 @@ draw_piece:
         lda draw_mode
         beq erase
 draw:   
-        ldy k
-        ldx $1001,y
+        jsr get_piece_cell_offset // in y
+        lda ($fd),y // piece data pointer
         beq erase
         lda #160 // cell on
         ldy #0
@@ -222,8 +234,8 @@ right:  inc pos_ahead+1
         lda ($fb),y
         cmp #$e6
         bne !continue+
-        ldy k
-        ldx $1001,y
+        jsr get_piece_cell_offset
+        lda ($fd),y
         beq !continue+
         lda #0 // collision detected
         rts
@@ -271,7 +283,13 @@ main:
         lda #$04
         sta $fc        
         jsr grid_outline_side
-        
+
+        lda #<piece_i
+        sta $fd
+        lda #>piece_i
+        sta $fe
+        lda #0
+        sta piece_state
         lda #1
         jsr draw_piece
 
