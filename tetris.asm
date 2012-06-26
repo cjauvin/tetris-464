@@ -6,27 +6,25 @@
    cjauvin@gmail.com
    http://christianjauv.in
 */
+
+/*
+   ZP pointers:
+       $f9: current video page ($0400 or $0800)
+       $fb: draw/erase working page
+       $fd: solid page
+*/        
         
 :BasicUpstart2(main) // autostart macro
 
-.import source "math.asm"
-
-.pc = $1000 "Piece data"
-piece_o:        
-        .byte 1 // number of states
-        .byte 0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0
-piece_i:        
-        .byte 2
-        .byte 0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0
-        .byte 0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0
-        
-.pc = $2000 "Variables"
+.pc = $2000 "Variables and data"
+solid:          .fill 1000, 0
+page:           .byte 0     // only last bit 
 pos:            .byte 0, 18 // starting pos: top center        
 pos_ahead:      .word 0     // move lookahead
 piece_state:    .byte 0
-i:              .byte 0     // piece data row
-j:              .byte 0     // pd col   
-k:              .byte 0     // pd offset
+i:              .byte 0
+j:              .byte 0
+k:              .byte 0
 timer1:         .byte 0, 30 // val, target
 timer2:         .byte 0, 5  // val, target
 is_falling:     .byte 0     // bool
@@ -36,7 +34,18 @@ var_add0:       .word 0     // used by add2 and add3
 var_add1:       .word 0 
 var_add2:       .word 0 
 var_add3:       .word 0
-        
+// tetromino data        
+piece_o:        
+        .byte 1 // number of states
+        .byte 0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0
+piece_i:        
+        .byte 2
+        //.byte 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+        .byte 0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0
+        .byte 0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0
+
+.import source "math.asm"
+
 ///////////////////////////////////////////////////////
 
 /*
@@ -79,6 +88,37 @@ test_right:
         inc timer2
 !return:
         jmp $ea31 
+
+/////////////////////////////////////////
+        
+flip_page:
+        ldx $d018
+        lda page
+        and #1
+        beq flop
+flip:
+        lda #$00
+        sta $f9
+        lda #$08
+        sta $fa
+        txa
+        and #%00001111
+        ora #%00010000
+        jmp !continue+
+flop:
+        lda #$00
+        sta $f9
+        lda #$04
+        sta $fa
+        txa
+        and #%00001111
+        ora #%00100000
+!continue:
+        sta $d018
+        inc page
+        rts
+        
+/////////////////////////////////////////
         
 /*
    Draw left and right grid sides
@@ -100,176 +140,181 @@ grid_outline_side:
         bne !loop-
         rts
 
-/*
-    target cell address: 1024 + (pos[0]+i * 40) + pos[1]+j
-    y=0: use pos
-    y=1: use pos_ahead   
-*/
-get_cell_addr:
-        lda #0 // var_add0 <- 1024
+//////////////////////////////////////////
+
+// explicitly set 1000 cells to off        
+erase_screen:
+        lda $f9 // copy to working ptr
+        sta $fb
+        lda $fa
+        sta $fc
+        ldx #0
+!xloop4:        
+        ldy #0                
+!yloop250:
+        lda #32 // cell off
+        sta ($fb),y
+        iny
+        cpy #250
+        bne !yloop250-
+        // switch to next block of 250 cells        
+        lda $fb
         sta var_add0
-        lda #4
+        lda $fc
         sta var_add0+1
-        cpy #0
-        bne !use_ahead+
-        lda pos 
-        jmp !continue+
-!use_ahead:
-        lda pos_ahead
-!continue:        
-        clc
-        adc i 
+        lda #250
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr add2
+        lda var_add2
+        sta $fb
+        lda var_add2+1
+        sta $fc
+        inx
+        cpx #4
+        bne !xloop4-
+        rts
+
+//////////////////////////////////////////
+
+draw_piece:                
+        lda $f9         // var_add0 = ($f9)
+        sta var_add0    
+        lda $fa
+        sta var_add0+1        
+        lda pos
         ldx #40
         jsr mult
         stx var_add1  
-        sta var_add1+1
-        cpy #0
-        bne !use_ahead+
+        sta var_add1+1  // var_add1 = pos[0] * 40
         lda pos+1
-        jmp !continue+
-!use_ahead:
-        lda pos_ahead+1
-!continue:                
-        clc
-        adc j
         sta var_add2
         lda #0
-        sta var_add2+1
-        jsr add3 // var_add3 = var_add0 + var_add1 + var_add2
+        sta var_add2+1  // var_add2 = pos[1]
+        jsr add3        // var_add3 = var_add0 + var_add1 + var_add2
         lda var_add3
         sta $fb
         lda var_add3+1
         sta $fc
+        lda #0
+        sta k   // 0 to 15
+        lda #0
+        sta i   // 0 to 3
+!row_i:        
+        lda #0
+        sta j   // 0 to 3
+!col_j:        
+        ldy k
+        lda ($fd),y   // use tetromino data offset (k)
+        beq !cell_off+
+        lda #160
+        ldy j
+        sta ($fb),y   
+!cell_off:
+        inc k
+        inc j
+        lda j
+        cmp #4
+        bne !col_j-
+        lda $fb        // add 40 (i.e. go to next line)
+        sta var_add0
+        lda $fc
+        sta var_add0+1
+        lda #40
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr add2
+        lda var_add2
+        sta $fb
+        lda var_add2+1
+        sta $fc
+        inc i
+        lda i
+        cmp #4
+        bne !row_i-        
         rts
 
-get_piece_cell_offset:
-        lda piece_state
-        ldx #16
+//////////////////////////////////////////
+
+erase_piece: 
+        lda $f9         // var_add0 = ($f9)
+        sta var_add0    
+        lda $fa
+        sta var_add0+1        
+        lda pos
+        ldx #40
         jsr mult
-        inx
-        txa
-        clc
-        adc k
-        tay
-        rts        
-        
-/*
-   Draw piece at pos
-   acc=1 -> draw
-   acc=0 -> erase
-*/
-draw_piece:
-        sta draw_mode // 0:erase, 1:draw        
+        stx var_add1  
+        sta var_add1+1  // var_add1 = pos[0] * 40
+        lda pos+1
+        sta var_add2
         lda #0
-        sta k // from 0 to 15
-        sta i // 0 to 3 (piece rows)
-!row:
-        lda #0
-        sta j // 0 to 3 (piece cols)                
-!col:
-        ldy #0 // use pos
-        jsr get_cell_addr // -> $fb/$fc
-        lda draw_mode
-        beq erase
-draw:   
-        jsr get_piece_cell_offset // in y
-        lda ($fd),y // piece data pointer
-        beq erase
-        lda #160 // cell on
+        sta var_add2+1  // var_add2 = pos[1]
+        jsr add3        // var_add3 = var_add0 + var_add1 + var_add2
+        lda var_add3
+        sta $fb
+        lda var_add3+1
+        sta $fc
+        ldx #0
+!row_x:        
         ldy #0
+!col_y:        
+        lda #33
         sta ($fb),y
-        jmp !continue+
-erase:
-        ldy #0
-        lda ($fb),y
-        cmp #$e6 // solidified
-        beq !continue+                        
-        lda #32 // cell off
-        sta ($fb),y                
-!continue:       
-        inc k
-        inc j
-        lda j
-        cmp #4
-        bne !col-
-        inc i
-        lda i
-        cmp #4
-        bne !row-
-        rts
-               
-/*
-   Input:  
-      acc=0: down, acc=1: left, acc=2: right
-   Output:
-      acc=bool
-*/
-can_move:
-        ldx pos
-        ldy pos+1
-        stx pos_ahead
-        sty pos_ahead+1
-        cmp #0
-        beq down
-        cmp #1
-        beq left
-        cmp #2
-        beq right
-down:   inc pos_ahead
-        jmp !continue+
-left:   dec pos_ahead+1
-        jmp !continue+
-right:  inc pos_ahead+1
-!continue:
+        iny 
+        cpy #4
+        bne !col_y-
+        lda $fb        // add 40 (i.e. go to next line)
+        sta var_add0
+        lda $fc
+        sta var_add0+1
+        lda #40
+        sta var_add1
         lda #0
-        sta k // from 0 to 15
-        sta i // 0 to 3 (td rows)
-!row:
-        lda #0
-        sta j // 0 to 3 (td cols)
-!col:
-        ldy #1 // use pos_ahead
-        jsr get_cell_addr // -> $fb/$fc
-        ldy #0
-        lda ($fb),y
-        cmp #$e6
-        bne !continue+
-        jsr get_piece_cell_offset
-        lda ($fd),y
-        beq !continue+
-        lda #0 // collision detected
+        sta var_add1+1
+        jsr add2
+        lda var_add2
+        sta $fb
+        lda var_add2+1
+        sta $fc
+        inx
+        cpx #4
+        bne !row_x-        
         rts
-!continue:
-        inc k
-        inc j
-        lda j
-        cmp #4
-        bne !col-
-        inc i
-        lda i
-        cmp #4
-        bne !row-
-        lda #1 // no collision found
-        rts
-                
-/////////////////////////////////////////////        
-
+        
+//////////////////////////////////////////
+                        
 main:
-        jsr $e544   // clear screen
 
+        lda #$00
+        sta $f9
+        lda #$04
+        sta $fa        
+        jsr erase_screen // clear page 1
+
+        lda #$00
+        sta $f9
+        lda #$08
+        sta $fa        
+        jsr erase_screen // clear page 0
+        
         lda #128
         sta $028a // set key autorepeat
                 
-        // draw 3 parts of grid outline:        
+        // set 3 parts of grid outline in solid:
 
         // (1) bottom        
-        lda #$e6    // solid char
+        lda #1
         ldx #0
-!loop:  sta $07a6,x // $07a6 = 1024 + (23 * 40) + 14
+!loop:
+        sta $2041,x // $07a6 = 1024 + (23 * 40) + 14
         inx
         cpx #12
         bne !loop-
 
+/*        
         // (2) left
         lda #$36    // $fb -> $0436 = 1024 + (1 * 40) + 14
         sta $fb
@@ -283,16 +328,68 @@ main:
         lda #$04
         sta $fc        
         jsr grid_outline_side
+*/        
+                        
+        lda #0
+        sta piece_state
 
+        // make $fd point to piece data 
         lda #<piece_i
         sta $fd
         lda #>piece_i
         sta $fe
+        lda $fd
+        sta var_add0
+        lda $fe
+        sta var_add0+1        
+        lda piece_state
+        ldx #16
+        jsr mult
+        inx
+        stx var_add1
         lda #0
-        sta piece_state
-        lda #1
+        sta var_add1+1
+        jsr add2
+        lda var_add2
+        sta $fd
+        lda var_add2+1
+        sta $fe
+
         jsr draw_piece
 
+/*
+        jsr erase_piece
+        inc pos
+        jsr draw_piece
+        jsr flip_page
+        
+        jsr erase_piece
+        inc pos
+        jsr draw_piece
+        jsr flip_page
+        
+        jsr erase_piece
+        inc pos
+        jsr draw_piece
+        jsr flip_page
+
+        jmp *
+        
+        lda $d018
+        and #%00001111
+        ora #%00010000
+        sta $d018
+        
+        jmp *
+
+        jsr erase_piece
+        inc pos
+        jsr draw_piece
+        jsr flip_page
+        
+        jmp *
+*/
+                        
         // set interrupt handler
         sei       
         lda #<interrupt_handler
@@ -311,36 +408,38 @@ main_loop:
         beq do_right
         jmp main_loop
 do_fall:
-        lda #0
-        jsr draw_piece
+        
+        jsr erase_screen // prepare next page
         inc pos
-        lda #1
         jsr draw_piece
+        jsr flip_page
+        
         lda #0
         sta is_falling
         jmp main_loop        
 do_left:
-        lda #1
-        jsr can_move // can move left?
-        beq main_loop
-        lda #0
-        jsr draw_piece
+        //lda #1
+        //jsr can_move // can move left?
+        //beq main_loop
+
+        jsr erase_screen // prepare next page
         dec pos+1       // piece left
-        lda #1
         jsr draw_piece
+        jsr flip_page
+
         lda #0
         sta moving_dir
         jmp main_loop
 do_right:
-        lda #2
-        jsr can_move // can move right?
-        beq main_loop
-        lda #0
-        jsr draw_piece
+        //lda #2
+        //jsr can_move // can move right?
+        //beq main_loop
+
+        jsr erase_screen // prepare next page
         inc pos+1       // piece right
-        lda #1
         jsr draw_piece
+        jsr flip_page
+
         lda #0
         sta moving_dir
         jmp main_loop
-        
