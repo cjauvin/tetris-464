@@ -30,7 +30,8 @@ use_page_flipping:
                 .byte 1     // set to 0 to turn off
 pos:            .byte 0, 18 // starting pos: top center        
 pos_ahead:      .word 0     // move lookahead
-piece_state:    .byte 0     //
+state:          .byte 0     //
+state_ahead:    .byte 0        
 i:              .byte 0     // 0 to 3
 j:              .byte 0     // 0 to 3
 k:              .byte 0     // i * 4 + j
@@ -42,15 +43,16 @@ var_add0:       .word 0     // used by math.asm add2 and add3
 var_add1:       .word 0  
 var_add2:       .word 0 
 var_add3:       .word 0
+is_w_key_pressed:
+                .byte 0     // bool
 // tetromino data        
-piece_o:        
-        .byte 1 // number of states
-        .byte 0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0
 piece_i:        
-        .byte 2
-        //.byte 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+        .byte 2 // number of states
         .byte 0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0 // |
         .byte 0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0 // -
+piece_o:        
+        .byte 1 
+        .byte 0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0
 // ..others soon to come!        
 
 .import source "math.asm"
@@ -308,7 +310,7 @@ cell_on:
 
 /*
    Input:  
-      acc=0: down, acc=1: left, acc=2: right
+      acc: 0=down, 1=left, 2=right, 3=rotate
    Output:
       acc=bool
 */
@@ -317,12 +319,16 @@ can_move:
         ldy pos+1
         stx pos_ahead
         sty pos_ahead+1
+        ldx state
+        stx state_ahead
         cmp #0
         beq test_down
         cmp #1
         beq test_left
         cmp #2
         beq test_right
+        cmp #3
+        beq test_rotate
 test_down:
         inc pos_ahead
         jmp !continue+
@@ -331,6 +337,18 @@ test_left:
         jmp !continue+
 test_right:
         inc pos_ahead+1
+        jmp !continue+
+test_rotate:
+        ldx state_ahead
+        inx
+        cpx piece_i // piece_i is hardcoded for the moment
+        bne !inc_state_ahead+
+        ldx #0
+!inc_state_ahead:
+        stx state_ahead
+        ldy #1 // use state_ahead
+        jsr update_piece_data_pointer
+        
 !continue:        
         lda $f7         // var_add0 = ($f7)
         sta var_add0    
@@ -384,6 +402,8 @@ test_right:
         ldy j
         lda ($fb),y   // and is there also a solidified cell at loc?
         beq !continue+
+        ldy #0 // restore normal state ptr
+        jsr update_piece_data_pointer
         lda #0
         rts           // if yes, collision detected, return right away
 !continue:
@@ -426,6 +446,43 @@ test_right:
         cmp #4
         bne !row_i-        
         lda #1        // no collision found
+        ldy #0 // restore normal state ptr
+        jsr update_piece_data_pointer
+        rts
+
+//////////////////////////////////////////////////////////////////////
+
+// make $fd point to piece data (with respect to piece and state vars)
+// y: 0=use state, 1=use state_ahead
+update_piece_data_pointer:      
+        lda #<piece_i // piece_i is hardcoded for the moment
+        sta $fd
+        lda #>piece_i
+        sta $fe
+        lda $fd
+        sta var_add0
+        lda $fe
+        sta var_add0+1
+
+        cpy #1
+        beq !use_state_ahead+
+        lda state
+        jmp !continue+
+!use_state_ahead:
+        lda state_ahead
+
+!continue:        
+        ldx #16
+        jsr mult
+        inx
+        stx var_add1
+        lda #0
+        sta var_add1+1
+        jsr add2
+        lda var_add2
+        sta $fd
+        lda var_add2+1
+        sta $fe
         rts
         
 //////////////////////////////////////////////////////////////////////
@@ -447,30 +504,10 @@ main:
         jsr init_grid_outline
                         
         lda #0
-        sta piece_state
-
-        // make $fd point to piece data 
-        lda #<piece_i
-        sta $fd
-        lda #>piece_i
-        sta $fe
-        lda $fd
-        sta var_add0
-        lda $fe
-        sta var_add0+1        
-        lda piece_state
-        ldx #16
-        jsr mult
-        inx
-        stx var_add1
-        lda #0
-        sta var_add1+1
-        jsr add2
-        lda var_add2
-        sta $fd
-        lda var_add2+1
-        sta $fe
-
+        sta state
+        ldy #0 // use state (i.e. not state_ahead)
+        jsr update_piece_data_pointer
+        
         jsr redraw_screen
         jsr draw_piece
         jsr flip_page
@@ -520,37 +557,88 @@ scan_keyboard:
         lda $dc01
         cmp #$fb
         beq do_right
+
+        lda is_w_key_pressed // is W already pressed?
+        bne debounce_w // yes, debounce it
+        lda #$fd // no, check it
+        sta $dc00
+        lda $dc01
+        cmp #$fd
+        bne main_loop // not pressed
+        lda #1        // yes, set for debounce
+        sta is_w_key_pressed
+        
         jmp main_loop
+        
+debounce_w:
+        lda #$fd // check for not-W (i.e. W release)
+        sta $dc00
+        lda $dc01
+        cmp #$fd
+        bne do_rotate
+        jmp main_loop        
 do_fall:
         lda #0
         jsr can_move // can move down?
-        beq main_loop        
+        beq !continue+
         jsr redraw_screen // prepare next page
         inc pos
         jsr draw_piece
-        jsr flip_page                
+        jsr flip_page
+!continue:        
         lda #0
         sta is_falling // stop falling
         jmp main_loop        
 do_left:
         lda #1
-        jsr can_move // can move left?
-        beq main_loop
+        jsr can_move // move left possible?
+        beq !continue+
         jsr redraw_screen // prepare next page
         dec pos+1         // piece left
         jsr draw_piece
         jsr flip_page
+!continue:        
         lda #0
         sta check_keyboard       
         jmp main_loop        
 do_right:
         lda #2
-        jsr can_move // can move right?
-        beq main_loop
+        jsr can_move // move right possible??
+        beq !continue+
         jsr redraw_screen // prepare next page
         inc pos+1       // piece right
         jsr draw_piece
         jsr flip_page
+!continue:        
         lda #0
         sta check_keyboard        
         jmp main_loop
+do_rotate:
+
+        lda #3
+        jsr can_move // rotation possible?
+        beq !continue+
+        
+        ldx state
+        inx
+        cpx piece_i // piece_i is hardcoded for the moment
+        bne !inc_state+
+        ldx #0
+!inc_state:
+        stx state
+        ldy #0 // use state
+        jsr update_piece_data_pointer
+                        
+        jsr redraw_screen // prepare next page
+        jsr draw_piece
+        jsr flip_page
+
+!continue:        
+        lda #0
+        sta check_keyboard        
+
+        lda #0        // reset key
+        sta is_w_key_pressed
+
+        jmp main_loop
+        
