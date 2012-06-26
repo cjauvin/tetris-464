@@ -9,29 +9,37 @@
 
 /*
    ZP pointers:
-       $f9: current video page ($0400 or $0800)
-       $fb: draw/erase working page
-       $fd: solid page
+       $f7: start of current video page (flips between $0400 and $0800)
+       $f9: working ptr for draw/erase operations (gets incremented from ($f7))
+       $fb: buffer of "solidifed" cells (outline grid + fixed pieces)
+       $fd: current piece data
+
+   Keyboard controls:
+       'A': left
+       'D': right
+       (W/S not still implemented)
+        
 */        
         
 :BasicUpstart2(main) // autostart macro
 
 .pc = $2000 "Variables and data"
-solid:          .fill 1000, 0
-page:           .byte 0     // only last bit 
+solidified:     .fill 1000, 0
+page:           .byte 0     // last bit as toggle
+use_page_flipping:
+                .byte 1     // set to 0 to turn off
 pos:            .byte 0, 18 // starting pos: top center        
 pos_ahead:      .word 0     // move lookahead
-piece_state:    .byte 0
-i:              .byte 0
-j:              .byte 0
-k:              .byte 0
-timer1:         .byte 0, 30 // val, target
-timer2:         .byte 0, 5  // val, target
+piece_state:    .byte 0     //
+i:              .byte 0     // 0 to 3
+j:              .byte 0     // 0 to 3
+k:              .byte 0     // i * 4 + j
+timer1:         .byte 0, 30 // current value, target
+timer2:         .byte 0, 5  // 
 is_falling:     .byte 0     // bool
-moving_dir:     .byte 0    // 0:none, 1:left, 2:right
-draw_mode:      .byte 0     // 0:erase, 1:draw, 
-var_add0:       .word 0     // used by add2 and add3 
-var_add1:       .word 0 
+check_keyboard: .byte 0     // bool
+var_add0:       .word 0     // used by math.asm add2 and add3 
+var_add1:       .word 0  
 var_add2:       .word 0 
 var_add3:       .word 0
 // tetromino data        
@@ -41,75 +49,79 @@ piece_o:
 piece_i:        
         .byte 2
         //.byte 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
-        .byte 0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0
-        .byte 0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0
+        .byte 0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0 // |
+        .byte 0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0 // -
+// ..others soon to come!        
 
 .import source "math.asm"
 
-///////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
 
-/*
-   Interrupt handler: handle timers and set moving flags 
-*/
-interrupt_handler:
-        // animate piece fall
+// set kbd and falling anim flags according to timers        
+raster_interrupt_handler:
+        pha // not sure if register state preserving is really needed?
+        txa
+        pha
+        tya
+        pha
+check_timer1:   
         lda timer1
         cmp timer1+1
         bne !wait+
         lda #1
-        sta is_falling
+        sta is_falling // set falling animation flag
         lda #0
-        sta timer1
-        jmp !return+
-        jmp keyboard_input
+        sta timer1     // reset animation timer
+        jmp check_timer2
 !wait:
         inc timer1
-keyboard_input: 
+check_timer2:
         lda timer2
         cmp timer2+1
         bne !wait+
-        lda #0
-        sta timer2
-        jsr $ffe4
-        beq !return+
-test_left:      
-        cmp #$41      // 'A' key
-        bne test_right
         lda #1
-        sta moving_dir
-        jmp !return+
-test_right:
-        cmp #$44      // 'D' key
-        bne !return+
-        lda #2
-        sta moving_dir
-        jmp !return+
+        sta check_keyboard // set check kbd flag
+        lda #0
+        sta timer2     // reset kbd check timer
+        jmp !done+
 !wait:
-        inc timer2
-!return:
-        jmp $ea31 
-
-/////////////////////////////////////////
+        inc timer2        
+!done:
+        lda #$ff  // needed?
+        sta $d019
+        pla 
+        tay 
+        pla
+        tax  
+        pla  
+        rti  
         
+//////////////////////////////////////////////////////////////////////
+        
+// toggles video ram between $0400 and $0800
 flip_page:
+        lda use_page_flipping
+        bne !continue+
+        rts
+!continue:                
         ldx $d018
         lda page
         and #1
         beq flop
 flip:
         lda #$00
-        sta $f9
+        sta $f7
         lda #$08
-        sta $fa
+        sta $f8
         txa
         and #%00001111
         ora #%00010000
         jmp !continue+
 flop:
         lda #$00
-        sta $f9
+        sta $f7
         lda #$04
-        sta $fa
+        sta $f8
         txa
         and #%00001111
         ora #%00100000
@@ -118,47 +130,162 @@ flop:
         inc page
         rts
         
-/////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+
+// draw piece in current video ram, at current position (pos)
+draw_piece:                
+        lda $f7         // var_add0 = ($f7)
+        sta var_add0    
+        lda $f8
+        sta var_add0+1        
+        lda pos
+        ldx #40
+        jsr mult
+        stx var_add1  
+        sta var_add1+1  // var_add1 = pos[0] * 40
+        lda pos+1
+        sta var_add2
+        lda #0
+        sta var_add2+1  // var_add2 = pos[1]
+        jsr add3        // var_add3 = var_add0 + var_add1 + var_add2
+        lda var_add3
+        sta $f9
+        lda var_add3+1
+        sta $fa
+        lda #0
+        sta k   // 0 to 15 (i * 4 + j)
+        lda #0
+        sta i   // 0 to 3
+!row_i:        
+        lda #0
+        sta j   // 0 to 3
+!col_j:        
+        ldy k
+        lda ($fd),y   // use tetromino data offset (k)
+        beq !cell_off+
+        lda #160
+        ldy j
+        sta ($f9),y   
+!cell_off:
+        inc k
+        inc j
+        lda j
+        cmp #4
+        bne !col_j-
+        lda $f9        // += 40 (i.e. go to next line)
+        sta var_add0
+        lda $fa
+        sta var_add0+1
+        lda #40
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr add2
+        lda var_add2
+        sta $f9
+        lda var_add2+1
+        sta $fa
+        inc i
+        lda i
+        cmp #4
+        bne !row_i-        
+        rts
+
+//////////////////////////////////////////////////////////////////////
+
+// functions to add grid outline "fixed" cells to the "solidified" buffer
         
-/*
-   Draw left and right grid sides
-*/
-grid_outline_side:
+init_grid_outline_side:
         ldx #0
         ldy #0
-!loop:  clc         // (($fb) += 40) X 21
-        lda $fb,y
+!loop:
+        clc         
+        lda $fb
         adc #40
         sta $fb
-        lda $fc,y
+        lda $fc
         adc #00
         sta $fc
-        lda #$e6
+        lda #160
         sta ($fb),y
         inx
         cpx #21
         bne !loop-
         rts
 
-//////////////////////////////////////////
+init_grid_outline:
 
-// explicitly set 1000 cells to off        
-erase_screen:
-        lda $f9 // copy to working ptr
+        // (1) bottom        
+        lda #1
+        ldx #0
+!loop:
+        sta $23a6,x // 8192 + (23 * 40) + 14
+        inx
+        cpx #12
+        bne !loop-
+
+        // (2) left
+        lda #$36    // 8192 + (1 * 40) + 14
         sta $fb
-        lda $fa
+        lda #$20
+        sta $fc        
+        jsr init_grid_outline_side
+        
+        // (3) right
+        lda #$41    // 8192 + (1 * 40) + 25
+        sta $fb
+        lda #$20
+        sta $fc        
+        jsr init_grid_outline_side
+
+        rts
+
+//////////////////////////////////////////////////////////////////////
+
+// blank screen while adding current solidified cells      
+redraw_screen:  
+        lda $f7 // copy video ptr to working ptr
+        sta $f9
+        lda $f8
+        sta $fa
+
+        lda #<solidified
+        sta $fb
+        lda #>solidified
         sta $fc
+        
         ldx #0
 !xloop4:        
         ldy #0                
 !yloop250:
-        lda #32 // cell off
-        sta ($fb),y
+        lda ($fb),y // if solidified cell at location..
+        bne cell_on // set cell on
+        lda #32 // if not, set cell off
+        jmp !continue+
+cell_on:
+        lda #160
+!continue:        
+        sta ($f9),y
         iny
         cpy #250
         bne !yloop250-
+
         // switch to next block of 250 cells        
-        lda $fb
+        lda $f9           // current video pointer += 250
+        sta var_add0
+        lda $fa
+        sta var_add0+1
+        lda #250
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr add2
+        lda var_add2
+        sta $f9
+        lda var_add2+1
+        sta $fa
+        
+        lda $fb           // solidified pointer += 250
         sta var_add0
         lda $fc
         sta var_add0+1
@@ -171,34 +298,80 @@ erase_screen:
         sta $fb
         lda var_add2+1
         sta $fc
+                
         inx
         cpx #4
         bne !xloop4-
         rts
 
-//////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
 
-draw_piece:                
-        lda $f9         // var_add0 = ($f9)
+/*
+   Input:  
+      acc=0: down, acc=1: left, acc=2: right
+   Output:
+      acc=bool
+*/
+can_move:       
+        ldx pos         // pos_ahead is the queried possible next position
+        ldy pos+1
+        stx pos_ahead
+        sty pos_ahead+1
+        cmp #0
+        beq test_down
+        cmp #1
+        beq test_left
+        cmp #2
+        beq test_right
+test_down:
+        inc pos_ahead
+        jmp !continue+
+test_left:
+        dec pos_ahead+1
+        jmp !continue+
+test_right:
+        inc pos_ahead+1
+!continue:        
+        lda $f7         // var_add0 = ($f7)
         sta var_add0    
-        lda $fa
+        lda $f8
         sta var_add0+1        
-        lda pos
+        lda pos_ahead
         ldx #40
         jsr mult
         stx var_add1  
         sta var_add1+1  // var_add1 = pos[0] * 40
-        lda pos+1
+        lda pos_ahead+1
         sta var_add2
         lda #0
         sta var_add2+1  // var_add2 = pos[1]
         jsr add3        // var_add3 = var_add0 + var_add1 + var_add2
         lda var_add3
+        sta $f9
+        lda var_add3+1
+        sta $fa
+
+        lda #<solidified
+        sta var_add0    
+        lda #>solidified
+        sta var_add0+1        
+        lda pos_ahead
+        ldx #40
+        jsr mult
+        stx var_add1  
+        sta var_add1+1  
+        lda pos_ahead+1
+        sta var_add2
+        lda #0
+        sta var_add2+1  
+        jsr add3        
+        lda var_add3
         sta $fb
         lda var_add3+1
         sta $fc
+        
         lda #0
-        sta k   // 0 to 15
+        sta k   // 0 to 15 (i * 4 + j)
         lda #0
         sta i   // 0 to 3
 !row_i:        
@@ -206,18 +379,35 @@ draw_piece:
         sta j   // 0 to 3
 !col_j:        
         ldy k
-        lda ($fd),y   // use tetromino data offset (k)
-        beq !cell_off+
-        lda #160
+        lda ($fd),y   // use tetromino data offset (k): is there a cell at location?
+        beq !continue+
         ldy j
-        sta ($fb),y   
-!cell_off:
+        lda ($fb),y   // and is there also a solidified cell at loc?
+        beq !continue+
+        lda #0
+        rts           // if yes, collision detected, return right away
+!continue:
         inc k
         inc j
         lda j
         cmp #4
         bne !col_j-
-        lda $fb        // add 40 (i.e. go to next line)
+
+        lda $f9        // current video ptr += 40 (i.e. go to next line)
+        sta var_add0
+        lda $fa
+        sta var_add0+1
+        lda #40
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr add2
+        lda var_add2
+        sta $f9
+        lda var_add2+1
+        sta $fa
+
+        lda $fb        // solidified ptr += 40 (i.e. go to next line)
         sta var_add0
         lda $fc
         sta var_add0+1
@@ -230,105 +420,31 @@ draw_piece:
         sta $fb
         lda var_add2+1
         sta $fc
+        
         inc i
         lda i
         cmp #4
         bne !row_i-        
-        rts
-
-//////////////////////////////////////////
-
-erase_piece: 
-        lda $f9         // var_add0 = ($f9)
-        sta var_add0    
-        lda $fa
-        sta var_add0+1        
-        lda pos
-        ldx #40
-        jsr mult
-        stx var_add1  
-        sta var_add1+1  // var_add1 = pos[0] * 40
-        lda pos+1
-        sta var_add2
-        lda #0
-        sta var_add2+1  // var_add2 = pos[1]
-        jsr add3        // var_add3 = var_add0 + var_add1 + var_add2
-        lda var_add3
-        sta $fb
-        lda var_add3+1
-        sta $fc
-        ldx #0
-!row_x:        
-        ldy #0
-!col_y:        
-        lda #33
-        sta ($fb),y
-        iny 
-        cpy #4
-        bne !col_y-
-        lda $fb        // add 40 (i.e. go to next line)
-        sta var_add0
-        lda $fc
-        sta var_add0+1
-        lda #40
-        sta var_add1
-        lda #0
-        sta var_add1+1
-        jsr add2
-        lda var_add2
-        sta $fb
-        lda var_add2+1
-        sta $fc
-        inx
-        cpx #4
-        bne !row_x-        
+        lda #1        // no collision found
         rts
         
-//////////////////////////////////////////
-                        
+//////////////////////////////////////////////////////////////////////
+        
 main:
 
         lda #$00
-        sta $f9
-        lda #$04
-        sta $fa        
-        jsr erase_screen // clear page 1
+        sta $f7
+        lda #$08
+        sta $f8        
+        jsr redraw_screen // clear page 1
 
         lda #$00
-        sta $f9
-        lda #$08
-        sta $fa        
-        jsr erase_screen // clear page 0
-        
-        lda #128
-        sta $028a // set key autorepeat
-                
-        // set 3 parts of grid outline in solid:
-
-        // (1) bottom        
-        lda #1
-        ldx #0
-!loop:
-        sta $2041,x // $07a6 = 1024 + (23 * 40) + 14
-        inx
-        cpx #12
-        bne !loop-
-
-/*        
-        // (2) left
-        lda #$36    // $fb -> $0436 = 1024 + (1 * 40) + 14
-        sta $fb
+        sta $f7
         lda #$04
-        sta $fc        
-        jsr grid_outline_side
-        
-        // (3) right
-        lda #$41    // $fb -> $0442 = 1024 + (1 * 40) + 25
-        sta $fb
-        lda #$04
-        sta $fc        
-        jsr grid_outline_side
-*/        
+        sta $f8        
+        jsr redraw_screen // clear page 0 (that's the one we're first pointing to)
+
+        jsr init_grid_outline
                         
         lda #0
         sta piece_state
@@ -355,91 +471,86 @@ main:
         lda var_add2+1
         sta $fe
 
-        jsr draw_piece
-
-/*
-        jsr erase_piece
-        inc pos
+        jsr redraw_screen
         jsr draw_piece
         jsr flip_page
         
-        jsr erase_piece
-        inc pos
-        jsr draw_piece
-        jsr flip_page
-        
-        jsr erase_piece
-        inc pos
-        jsr draw_piece
-        jsr flip_page
-
-        jmp *
-        
-        lda $d018
-        and #%00001111
-        ora #%00010000
-        sta $d018
-        
-        jmp *
-
-        jsr erase_piece
-        inc pos
-        jsr draw_piece
-        jsr flip_page
-        
-        jmp *
-*/
-                        
         // set interrupt handler
-        sei       
-        lda #<interrupt_handler
-        sta 788   
-        lda #>interrupt_handler
-        sta 789
-        cli       
+        // taken from: http://codebase64.org/doku.php?id=base:introduction_to_raster_irqs
+        sei        //disable maskable IRQs
+        lda #$7f
+        sta $dc0d  //disable timer interrupts which can be generated by the two CIA chips
+        sta $dd0d  //the kernal uses such an interrupt to flash the cursor and scan the keyboard, so we better
+                   //stop it.
+        lda $dc0d  //by reading this two registers we negate any pending CIA irqs.
+        lda $dd0d  //if we don't do this, a pending CIA irq might occur after we finish setting up our irq.
+                   //we don't want that to happen.
+        lda #$01   //this is how to tell the VICII to generate a raster interrupt
+        sta $d01a
+        lda #$fc   //this is how to tell at which rasterline we want the irq to be triggered
+        sta $d012
+        lda #$1b   //as there are more than 256 rasterlines, the topmost bit of $d011 serves as
+        sta $d011  //the 8th bit for the rasterline we want our irq to be triggered.
+                   //here we simply set up a character screen, leaving the topmost bit 0.
+        lda #$35   //we turn off the BASIC and KERNAL rom here
+        sta $01    //the cpu now sees RAM everywhere except at $d000-$e000, where still the registers of
+                   //SID/VICII/etc are visible
+        lda #<raster_interrupt_handler  //this is how we set up
+        sta $fffe  //the address of our interrupt code
+        lda #>raster_interrupt_handler
+        sta $ffff
+        cli        //enable maskable interrupts again
+
+//////////////////////////////////////////////////////////////////////
         
 main_loop:
         lda is_falling
         bne do_fall
-        lda moving_dir
-        cmp #1
+        lda check_keyboard
+        bne scan_keyboard
+        jmp main_loop
+scan_keyboard: 
+        lda #$fd // check A key
+        sta $dc00
+        lda $dc01
+        cmp #$fb
         beq do_left
-        cmp #2
+        lda #$fb // check D key
+        sta $dc00
+        lda $dc01
+        cmp #$fb
         beq do_right
         jmp main_loop
 do_fall:
-        
-        jsr erase_screen // prepare next page
+        lda #0
+        jsr can_move // can move down?
+        beq main_loop        
+        jsr redraw_screen // prepare next page
         inc pos
         jsr draw_piece
-        jsr flip_page
-        
+        jsr flip_page                
         lda #0
-        sta is_falling
+        sta is_falling // stop falling
         jmp main_loop        
 do_left:
-        //lda #1
-        //jsr can_move // can move left?
-        //beq main_loop
-
-        jsr erase_screen // prepare next page
-        dec pos+1       // piece left
+        lda #1
+        jsr can_move // can move left?
+        beq main_loop
+        jsr redraw_screen // prepare next page
+        dec pos+1         // piece left
         jsr draw_piece
         jsr flip_page
-
         lda #0
-        sta moving_dir
-        jmp main_loop
+        sta check_keyboard       
+        jmp main_loop        
 do_right:
-        //lda #2
-        //jsr can_move // can move right?
-        //beq main_loop
-
-        jsr erase_screen // prepare next page
+        lda #2
+        jsr can_move // can move right?
+        beq main_loop
+        jsr redraw_screen // prepare next page
         inc pos+1       // piece right
         jsr draw_piece
         jsr flip_page
-
         lda #0
-        sta moving_dir
+        sta check_keyboard        
         jmp main_loop

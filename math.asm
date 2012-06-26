@@ -1,4 +1,5 @@
-/*        
+/*
+  Code taken from: http://codebase64.org/doku.php?id=base:multiplication_and_division
   8 bit multiplication, written by Damon Slye
   call:	  accu: multiplier
       	  x-register: multiplicant
@@ -58,19 +59,5 @@ add3:
         adc var_add2+1 
         sta var_add3+1 
         rts
-
-/*        
-add3:
-        clc
-        lda var_add0
-        adc var_add1
-        adc var_add2
-        sta var_add3
-        lda var_add0+1
-        adc var_add1+1
-        adc var_add2+1
-        sta var_add3+1
-        rts
-*/        
         
         
