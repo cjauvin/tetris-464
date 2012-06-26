@@ -28,6 +28,9 @@ solidified:     .fill 1000, 0
 page:           .byte 0     // last bit as toggle
 use_page_flipping:
                 .byte 1     // set to 0 to turn off
+is_page_flipping_required:
+                .byte 0
+d018_value:     .byte 0     
 pos:            .byte 0, 18 // starting pos: top center        
 pos_ahead:      .word 0     // move lookahead
 state:          .byte 0     //
@@ -65,15 +68,23 @@ raster_interrupt_handler:
         txa
         pha
         tya
-        pha
+        pha        
+        lda is_page_flipping_required // commit page flipping if required
+        beq check_timer1
+        lda d018_value
+        sta $d018
+        lda #0
+        sta is_page_flipping_required        
 check_timer1:   
         lda timer1
         cmp timer1+1
         bne !wait+
-        lda #1
+        lda #1         // timer1 has reached its target value
         sta is_falling // set falling animation flag
         lda #0
         sta timer1     // reset animation timer
+        //lda d018_value
+        //sta $d018
         jmp check_timer2
 !wait:
         inc timer1
@@ -100,7 +111,8 @@ check_timer2:
         
 //////////////////////////////////////////////////////////////////////
         
-// toggles video ram between $0400 and $0800
+// toggles video ram between $0400 and $0800 (actually just engage it,
+// as the actual toggling need to be performed in the raster irq        
 flip_page:
         lda use_page_flipping
         bne !continue+
@@ -128,7 +140,10 @@ flop:
         and #%00001111
         ora #%00100000
 !continue:
-        sta $d018
+        sta d018_value
+        //sta $d018 // wait until until in the irq to commit the change
+        lda #1
+        sta is_page_flipping_required
         inc page
         rts
         
