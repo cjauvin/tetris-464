@@ -5,13 +5,11 @@
    June 2012
    cjauvin@gmail.com
    http://christianjauv.in
-*/
 
-/*
    ZP pointers:
        $f7: start of current video page (flips between $0400 and $0800)
        $f9: working ptr for draw/erase operations (gets incremented from ($f7))
-       $fb: buffer of "solidifed" cells (outline grid + fixed pieces)
+       $fb: buffer of "frozen" cells (outline grid + fixed pieces)
        $fd: current piece data
 
    Keyboard controls:
@@ -25,7 +23,7 @@
 :BasicUpstart2(main) // autostart macro
 
 .pc = $2000 "Variables and data"
-solidified:     .fill 1000, 0
+frozen:         .fill 1000, 0 // frozen cells
 page:           .byte 0     // last bit as toggle
 use_page_flipping:
                 .byte 1     // set to 0 to turn off
@@ -33,13 +31,13 @@ is_page_flipping_required:
                 .byte 0
 d018_value:     .byte 0     
 pos:            .byte 0, 18 // starting pos: top center        
-pos_ahead:      .word 0     // move lookahead
-state:          .byte 0     //
+pos_ahead:      .word 0     // lateral move lookahead for collision detection
+state:          .byte 0     // piece rotation lookahead for collision detection
 state_ahead:    .byte 0        
 i:              .byte 0     // 0 to 3
 j:              .byte 0     // 0 to 3
 k:              .byte 0     // i * 4 + j
-timer1:         .byte 0, 30 // current value, target
+timer1:         .byte 0, 10 // current value, target
 timer2:         .byte 0, 5  // 
 is_falling:     .byte 0     // bool
 check_keyboard: .byte 0     // bool
@@ -167,7 +165,7 @@ draw_piece:
         sta var_add2+1  // var_add2 = pos[1]
         jsr add3        // var_add3 = var_add0 + var_add1 + var_add2
         lda var_add3
-        sta $f9
+        sta $f9         // working ptr (will be incremented)
         lda var_add3+1
         sta $fa
         lda #0
@@ -211,7 +209,7 @@ draw_piece:
 
 //////////////////////////////////////////////////////////////////////
 
-// functions to add grid outline "fixed" cells to the "solidified" buffer
+// functions to add grid outline "fixed" cells to the "frozen" buffer
         
 init_grid_outline_side:
         ldx #0
@@ -260,23 +258,23 @@ init_grid_outline:
 
 //////////////////////////////////////////////////////////////////////
 
-// blank screen while adding current solidified cells      
+// blank screen while adding current frozen cells      
 redraw_screen:  
         lda $f7 // copy video ptr to working ptr
         sta $f9
         lda $f8
         sta $fa
 
-        lda #<solidified
+        lda #<frozen
         sta $fb
-        lda #>solidified
+        lda #>frozen
         sta $fc
         
         ldx #0
 !xloop4:        
         ldy #0                
 !yloop250:
-        lda ($fb),y // if solidified cell at location..
+        lda ($fb),y // if frozen cell at location..
         bne cell_on // set cell on
         lda #32 // if not, set cell off
         jmp !continue+
@@ -303,7 +301,7 @@ cell_on:
         lda var_add2+1
         sta $fa
         
-        lda $fb           // solidified pointer += 250
+        lda $fb           // frozen pointer += 250
         sta var_add0
         lda $fc
         sta var_add0+1
@@ -385,9 +383,9 @@ test_rotate:
         lda var_add3+1
         sta $fa
 
-        lda #<solidified
+        lda #<frozen
         sta var_add0    
-        lda #>solidified
+        lda #>frozen
         sta var_add0+1        
         lda pos_ahead
         ldx #40
@@ -416,7 +414,7 @@ test_rotate:
         lda ($fd),y   // use tetromino data offset (k): is there a cell at location?
         beq !continue+
         ldy j
-        lda ($fb),y   // and is there also a solidified cell at loc?
+        lda ($fb),y   // and is there also a frozen cell at loc?
         beq !continue+
         ldy #0 // restore normal state ptr
         jsr update_piece_data_pointer
@@ -443,7 +441,7 @@ test_rotate:
         lda var_add2+1
         sta $fa
 
-        lda $fb        // solidified ptr += 40 (i.e. go to next line)
+        lda $fb        // frozen ptr += 40 (i.e. go to next line)
         sta var_add0
         lda $fc
         sta var_add0+1
@@ -500,11 +498,70 @@ update_piece_data_pointer:
         lda var_add2+1
         sta $fe
         rts
-        
+
+//////////////////////////////////////////////////////////////////////
+
+freeze_piece:
+        lda #<frozen // compute corresponding position in frozen buffer
+        sta var_add0
+        lda #>frozen
+        sta var_add0+1
+        lda pos
+        ldx #40
+        jsr mult
+        stx var_add1  
+        sta var_add1+1  // var_add1 = pos[0] * 40
+        lda pos+1
+        sta var_add2
+        lda #0
+        sta var_add2+1  // var_add2 = pos[1]
+        jsr add3        // var_add3 = var_add0 + var_add1 + var_add2
+        lda var_add3
+        sta $fb         // working ptr (will be incremented)
+        lda var_add3+1
+        sta $fc                
+        lda #0
+        sta k   // 0 to 15 (i * 4 + j)
+        lda #0
+        sta i   // 0 to 3
+!row_i:        
+        lda #0
+        sta j   // 0 to 3
+!col_j:        
+        ldy k
+        lda ($fd),y   // use tetromino data offset (k)
+        beq !cell_off+
+        lda #160
+        ldy j
+        sta ($fb),y   
+!cell_off:
+        inc k
+        inc j
+        lda j
+        cmp #4
+        bne !col_j-
+        lda $fb        // += 40 (i.e. go to next line)
+        sta var_add0
+        lda $fc
+        sta var_add0+1
+        lda #40
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr add2
+        lda var_add2
+        sta $fb
+        lda var_add2+1
+        sta $fc
+        inc i
+        lda i
+        cmp #4
+        bne !row_i-        
+        rts
+                
 //////////////////////////////////////////////////////////////////////
         
 main:
-
         lda #$00
         sta $f7
         lda #$08
@@ -573,7 +630,6 @@ scan_keyboard:
         lda $dc01
         cmp #$fb
         beq do_right
-
         lda is_w_key_pressed // is W already pressed?
         bne debounce_w // yes, debounce it
         lda #$fd // no, check it
@@ -582,10 +638,8 @@ scan_keyboard:
         cmp #$fd
         bne main_loop // not pressed
         lda #1        // yes, set for debounce
-        sta is_w_key_pressed
-        
-        jmp main_loop
-        
+        sta is_w_key_pressed        
+        jmp main_loop        
 debounce_w:
         lda #$fd // check for not-W (i.e. W release)
         sta $dc00
@@ -596,14 +650,26 @@ debounce_w:
 do_fall:
         lda #0
         jsr can_move // can move down?
-        beq !continue+
+        beq reached_bottom
         jsr redraw_screen // prepare next page
         inc pos
         jsr draw_piece
         jsr flip_page
-!continue:        
         lda #0
         sta is_falling // stop falling
+        jmp main_loop        
+reached_bottom:
+        jsr freeze_piece
+        jsr redraw_screen // prepare next page
+        jsr flip_page
+        lda #0
+        sta is_falling // stop falling
+        lda #0
+        sta pos
+        lda #18
+        sta pos+1
+        lda #0
+        sta state
         jmp main_loop        
 do_left:
         lda #1
@@ -630,11 +696,9 @@ do_right:
         sta check_keyboard        
         jmp main_loop
 do_rotate:
-
         lda #3
         jsr can_move // rotation possible?
-        beq !continue+
-        
+        beq !continue+        
         ldx state
         inx
         cpx piece_i // piece_i is hardcoded for the moment
@@ -643,18 +707,14 @@ do_rotate:
 !inc_state:
         stx state
         ldy #0 // use state
-        jsr update_piece_data_pointer
-                        
+        jsr update_piece_data_pointer                        
         jsr redraw_screen // prepare next page
         jsr draw_piece
         jsr flip_page
-
 !continue:        
         lda #0
         sta check_keyboard        
-
         lda #0        // reset key
         sta is_w_key_pressed
-
         jmp main_loop
         
