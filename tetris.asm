@@ -17,7 +17,8 @@
    Keyboard controls:
        'A': left
        'D': right
-       (W/S not still implemented)
+       'W': rotate
+       ('S' not implemented yet)
         
 */        
         
