@@ -8,10 +8,10 @@
 
    ZP pointers (for data structures requiring indirect indexing):
        $f7: start of current video page (flips between $0400 and $0800)
-       $f9: working ptr for draw/erase operations (gets incremented from ($f7))
-       $fb: buffer of "frozen" cells (outline grid + fixed pieces)
+       $f9: buffer of "frozen" cells (outline grid + fixed pieces)
+       $fb: current piece data    
        $fd: current piece data state
-       $b0: current piece data    
+       $b0: helper ptr 
 
    Keyboard controls:
        'A': left
@@ -192,9 +192,9 @@ draw_piece:
         sta var_add2+1  // var_add2 = pos[1]
         jsr add3        // var_add3 = var_add0 + var_add1 + var_add2
         lda var_add3
-        sta $f9         // working ptr (will be incremented)
+        sta $b0         // working ptr (will be incremented)
         lda var_add3+1
-        sta $fa
+        sta $b1
         lda #0
         sta k   // 0 to 15 (i * 4 + j)
         lda #0
@@ -208,16 +208,16 @@ draw_piece:
         beq !cell_off+
         lda #160
         ldy j
-        sta ($f9),y   
+        sta ($b0),y   
 !cell_off:
         inc k
         inc j
         lda j
         cmp #4
         bne !col_j-
-        lda $f9        // += 40 (i.e. go to next line)
+        lda $b0        // += 40 (i.e. go to next line)
         sta var_add0
-        lda $fa
+        lda $b1
         sta var_add0+1
         lda #40
         sta var_add1
@@ -225,9 +225,9 @@ draw_piece:
         sta var_add1+1
         jsr add2
         lda var_add2
-        sta $f9
+        sta $b0
         lda var_add2+1
-        sta $fa
+        sta $b1
         inc i
         lda i
         cmp #4
@@ -243,14 +243,14 @@ init_grid_outline_side:
         ldy #0
 !loop:
         clc         
-        lda $fb
+        lda $f9
         adc #40
-        sta $fb
-        lda $fc
+        sta $f9
+        lda $fa
         adc #00
-        sta $fc
+        sta $fa
         lda #160
-        sta ($fb),y
+        sta ($f9),y
         inx
         cpx #21
         bne !loop-
@@ -269,16 +269,16 @@ init_grid_outline:
 
         // (2) left
         lda #$36    // 8192 + (1 * 40) + 14
-        sta $fb
+        sta $f9
         lda #$20
-        sta $fc        
+        sta $fa        
         jsr init_grid_outline_side
         
         // (3) right
         lda #$41    // 8192 + (1 * 40) + 25
-        sta $fb
+        sta $f9
         lda #$20
-        sta $fc        
+        sta $fa        
         jsr init_grid_outline_side
 
         rts
@@ -288,33 +288,47 @@ init_grid_outline:
 // blank screen while adding current frozen cells      
 redraw_screen:  
         lda $f7 // copy video ptr to working ptr
-        sta $f9
+        sta $b0
         lda $f8
-        sta $fa
+        sta $b1
 
         lda #<frozen
-        sta $fb
+        sta $f9
         lda #>frozen
-        sta $fc
+        sta $fa
         
         ldx #0
 !xloop4:        
         ldy #0                
 !yloop250:
-        lda ($fb),y // if frozen cell at location..
+        lda ($f9),y // if frozen cell at location..
         bne cell_on // set cell on
         lda #32 // if not, set cell off
         jmp !continue+
 cell_on:
         lda #160
 !continue:        
-        sta ($f9),y
+        sta ($b0),y
         iny
         cpy #250
         bne !yloop250-
 
         // switch to next block of 250 cells        
-        lda $f9           // current video pointer += 250
+        lda $b0           // current video pointer += 250
+        sta var_add0
+        lda $b1
+        sta var_add0+1
+        lda #250
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr add2
+        lda var_add2
+        sta $b0
+        lda var_add2+1
+        sta $b1
+        
+        lda $f9           // frozen pointer += 250
         sta var_add0
         lda $fa
         sta var_add0+1
@@ -327,20 +341,6 @@ cell_on:
         sta $f9
         lda var_add2+1
         sta $fa
-        
-        lda $fb           // frozen pointer += 250
-        sta var_add0
-        lda $fc
-        sta var_add0+1
-        lda #250
-        sta var_add1
-        lda #0
-        sta var_add1+1
-        jsr add2
-        lda var_add2
-        sta $fb
-        lda var_add2+1
-        sta $fc
                 
         inx
         cpx #4
@@ -383,7 +383,7 @@ test_rotate:
         inc state_ahead
         lda state_ahead
         ldy #0
-        cmp ($b0),y
+        cmp ($fb),y
         bne !inc_state_ahead+
         sty state_ahead // reset state to 0
 !inc_state_ahead:
@@ -405,9 +405,9 @@ test_rotate:
         sta var_add2+1  // var_add2 = pos[1]
         jsr add3        // var_add3 = var_add0 + var_add1 + var_add2
         lda var_add3
-        sta $f9
+        sta $b0
         lda var_add3+1
-        sta $fa
+        sta $b1
 
         lda #<frozen
         sta var_add0    
@@ -424,9 +424,9 @@ test_rotate:
         sta var_add2+1  
         jsr add3        
         lda var_add3
-        sta $fb
+        sta $f9
         lda var_add3+1
-        sta $fc
+        sta $fa
         
         lda #0
         sta k   // 0 to 15 (i * 4 + j)
@@ -440,7 +440,7 @@ test_rotate:
         lda ($fd),y   // use tetromino data offset (k): is there a cell at location?
         beq !continue+
         ldy j
-        lda ($fb),y   // and is there also a frozen cell at loc?
+        lda ($f9),y   // and is there also a frozen cell at loc?
         beq !continue+
         ldy #0 // restore normal state ptr
         jsr update_piece_data_pointer
@@ -453,7 +453,21 @@ test_rotate:
         cmp #4
         bne !col_j-
 
-        lda $f9        // current video ptr += 40 (i.e. go to next line)
+        lda $b0        // current video ptr += 40 (i.e. go to next line)
+        sta var_add0
+        lda $b1
+        sta var_add0+1
+        lda #40
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr add2
+        lda var_add2
+        sta $b0
+        lda var_add2+1
+        sta $b1
+
+        lda $f9        // frozen ptr += 40 (i.e. go to next line)
         sta var_add0
         lda $fa
         sta var_add0+1
@@ -466,20 +480,6 @@ test_rotate:
         sta $f9
         lda var_add2+1
         sta $fa
-
-        lda $fb        // frozen ptr += 40 (i.e. go to next line)
-        sta var_add0
-        lda $fc
-        sta var_add0+1
-        lda #40
-        sta var_add1
-        lda #0
-        sta var_add1+1
-        jsr add2
-        lda var_add2
-        sta $fb
-        lda var_add2+1
-        sta $fc
         
         inc i
         lda i
@@ -495,9 +495,9 @@ test_rotate:
 // make $fd point to piece data (with respect to piece and state vars)
 // y: 0=use state, 1=use state_ahead
 update_piece_data_pointer:      
-        lda $b0
+        lda $fb
         sta $fd
-        lda $b1
+        lda $fc
         sta $fe
         lda $fd
         sta var_add0
@@ -542,9 +542,9 @@ freeze_piece:
         sta var_add2+1  // var_add2 = pos[1]
         jsr add3        // var_add3 = var_add0 + var_add1 + var_add2
         lda var_add3
-        sta $fb         // working ptr (will be incremented)
+        sta $f9         // working ptr (will be incremented)
         lda var_add3+1
-        sta $fc                
+        sta $fa                
         lda #0
         sta k   // 0 to 15 (i * 4 + j)
         lda #0
@@ -558,16 +558,16 @@ freeze_piece:
         beq !cell_off+
         lda #160
         ldy j
-        sta ($fb),y   
+        sta ($f9),y   
 !cell_off:
         inc k
         inc j
         lda j
         cmp #4
         bne !col_j-
-        lda $fb        // += 40 (i.e. go to next line)
+        lda $f9        // += 40 (i.e. go to next line)
         sta var_add0
-        lda $fc
+        lda $fa
         sta var_add0+1
         lda #40
         sta var_add1
@@ -575,9 +575,9 @@ freeze_piece:
         sta var_add1+1
         jsr add2
         lda var_add2
-        sta $fb
+        sta $f9
         lda var_add2+1
-        sta $fc
+        sta $fa
         inc i
         lda i
         cmp #4
@@ -586,27 +586,11 @@ freeze_piece:
 
 //////////////////////////////////////////////////////////////////////
 
-clear_rows:
-        lda #$7f // start at bottom row
-        sta $fb
-        lda #$23
-        sta $fc
-        ldx #0
-!row_x:        
-        ldy #0 // cols
-!col_y:        
-        lda ($fb),y
-        beq incomplete // hole found, go to next row (above)
-        iny
-        cpy #10
-        bne !col_y-
-complete:
-        inc $d020
-        /* clear */        
-incomplete:
-        lda $fb
+// $f9 -= #40        
+shift_frozen_ptr_to_row_above:
+        lda $f9
         sta var_add0
-        lda $fc
+        lda $fa
         sta var_add0+1
         lda #40
         sta var_add1
@@ -614,12 +598,74 @@ incomplete:
         sta var_add1+1
         jsr sub2
         lda var_add2
-        sta $fb
+        sta $f9
         lda var_add2+1
-        sta $fc        
+        sta $fa        
+        rts
+
+// $b0 -= #40        
+shift_frozen_helper_ptr_to_row_above:
+        lda $b0
+        sta var_add0
+        lda $b1
+        sta var_add0+1
+        lda #40
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr sub2
+        lda var_add2
+        sta $b0
+        lda var_add2+1
+        sta $b1        
+        rts
+        
+// x is already set at proper value (row at which to begin the collapse)
+collapse:
+        lda $f9 // get frozen helper ptr, pointing one row above
+        sta $b0
+        lda $fa
+        sta $b1
+        jsr shift_frozen_helper_ptr_to_row_above                
+!row_x:
+        ldy #0
+!col_y:
+        lda ($b0),y // get what's one row above
+        sta ($f9),y // and copy it to current row        
+        iny
+        cpy #10
+        bne !col_y-
+        jsr shift_frozen_ptr_to_row_above
+        jsr shift_frozen_helper_ptr_to_row_above                
         inx
         cpx #20
-        bne !row_x-        
+        bne !row_x-                
+        rts
+        
+clear_rows:
+        lda #$7f // start at bottom row: frozen + (22 * 40) + 15
+        sta $f9
+        lda #$23
+        sta $fa
+        ldx #0
+!row_x:        
+        ldy #0 // cols
+!col_y:        
+        lda ($f9),y
+        beq incomplete // hole found, go to next row (above)
+        iny
+        cpy #10
+        bne !col_y-
+complete:
+        //inc $d020 // debug: change border color
+        jsr collapse
+        jmp clear_rows // we possibly need to redo it up to 4 times
+incomplete:
+        jsr shift_frozen_ptr_to_row_above
+        inx
+        cpx #20
+        bne !row_x-
+        rts
         
 //////////////////////////////////////////////////////////////////////
 
@@ -632,6 +678,16 @@ get_random_number:
 //////////////////////////////////////////////////////////////////////
 
 pick_random_piece:
+
+        // uncomment to always get piece_i
+/*        
+        ldx #<piece_i
+        ldy #>piece_i
+        stx $fb
+        sty $fc        
+        rts
+*/        
+        
         jsr get_random_number
         and #%00000111
         cmp #%00000000
@@ -675,8 +731,8 @@ pick_random_piece:
         ldx #<piece_j
         ldy #>piece_j
 !found:        
-        stx $b0
-        sty $b1        
+        stx $fb
+        sty $fc        
         rts
         
 //////////////////////////////////////////////////////////////////////
@@ -719,7 +775,7 @@ main:
                    //we don't want that to happen.
         lda #$01   //this is how to tell the VICII to generate a raster interrupt
         sta $d01a
-        lda #$fc   //this is how to tell at which rasterline we want the irq to be triggered
+        lda #$fa   //this is how to tell at which rasterline we want the irq to be triggered
         sta $d012
         lda #$1b   //as there are more than 256 rasterlines, the topmost bit of $d011 serves as
         sta $d011  //the 8th bit for the rasterline we want our irq to be triggered.
@@ -827,7 +883,7 @@ do_rotate:
         inc state
         lda state
         ldy #0
-        cmp ($b0),y        
+        cmp ($fb),y        
         bne !inc_state+
         sty state // reset state to 0
 !inc_state:
