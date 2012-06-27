@@ -17,8 +17,7 @@
        'A': left
        'D': right
        'W': rotate
-       'S': speed up fall
-        
+       'S': speed up fall        
 */        
         
 :BasicUpstart2(main) // autostart macro
@@ -32,7 +31,7 @@ is_page_flipping_required:
                 .byte 0
 d018_value:     .byte 0
 piece_ptr:      .word 0
-pos:            .byte 0, 18 // starting pos: top center        
+pos:            .word 0     // lobyte: row (0 to 24), hibyte: col (0 to 39)
 pos_ahead:      .word 0     // lateral move lookahead for collision detection
 state:          .byte 0     // piece rotation lookahead for collision detection
 state_ahead:    .byte 0        
@@ -40,8 +39,8 @@ z:              .byte 0     /* used to map row/col piece indices to a single val
                                I suspect that there might a clever bitwise way of doing it (that wouldn't
                                require a variable at all, but for the moment that will dd)
                             */
-timer1:         .byte 0, 10 // current value, target
-timer2:         .byte 0, 5  // 
+timer1:         .byte 0, 30 // current value, target
+timer2:         .byte 0, 3  // 
 is_falling:     .byte 0     // bool
 check_keyboard: .byte 0     // bool
 var_add0:       .word 0     // used by math.asm add2 and add3 
@@ -49,7 +48,9 @@ var_add1:       .word 0
 var_add2:       .word 0 
 var_add3:       .word 0
 is_w_key_pressed:
-                .byte 0     // bool
+                .byte 0     // bool, to debounce
+is_s_key_pressed:
+                .byte 0     // idem
 // tetromino data        
 piece_i:        
         .byte 2 // number of states
@@ -91,6 +92,7 @@ piece_j:
 
 // set kbd and falling anim flags according to timers        
 raster_interrupt_handler:
+
         pha // not sure if register state preserving is really needed?
         txa
         pha
@@ -137,8 +139,9 @@ check_timer2:
 //////////////////////////////////////////////////////////////////////
         
 // toggles video ram between $0400 and $0800 (actually just engage it,
-// as the actual toggling need to be performed in the raster irq        
+// as the actual toggling need to be performed in the raster irq)
 flip_page:
+
         lda use_page_flipping
         bne !continue+
         rts
@@ -166,9 +169,8 @@ flop:
         ora #%00100000
 !continue:
         sta d018_value
-        //sta $d018 // wait until until in the irq to commit the change
         lda #1
-        sta is_page_flipping_required
+        sta is_page_flipping_required // wait until until in the irq to commit the change to $d018
         inc page
         rts
         
@@ -176,6 +178,9 @@ flop:
 
 // draw piece in current video ram, at current position (pos)
 draw_piece:                
+
+        // jump to video location: base_loc + (pos[0] * 40) + pos[1]
+                
         lda $f7         // var_add0 = ($f7)
         sta var_add0    
         lda $f8
@@ -238,9 +243,10 @@ draw_piece:
 
 //////////////////////////////////////////////////////////////////////
 
-// functions to add grid outline "fixed" cells to the "frozen" buffer
-        
+// functions to add grid outline cells to the "frozen" buffer,
+// to ease collision detection                
 init_grid_outline_side:
+
         ldx #0
         ldy #0
 !loop:
@@ -251,7 +257,7 @@ init_grid_outline_side:
         lda $fa
         adc #00
         sta $fa
-        lda #160
+        lda #1
         sta ($f9),y
         inx
         cpx #21
@@ -261,34 +267,69 @@ init_grid_outline_side:
 init_grid_outline:
 
         // (1) bottom        
-        lda #1
+        lda #1 /// cell on
         ldx #0
 !loop:
-        sta $23a6,x // 8192 + (23 * 40) + 14
+        sta $23a6,x // frozen + (23 * 40) + 14
         inx
         cpx #12
         bne !loop-
-
         // (2) left
         lda #$36    // 8192 + (1 * 40) + 14
         sta $f9
         lda #$20
         sta $fa        
-        jsr init_grid_outline_side
-        
+        jsr init_grid_outline_side        
         // (3) right
         lda #$41    // 8192 + (1 * 40) + 25
         sta $f9
         lda #$20
         sta $fa        
         jsr init_grid_outline_side
-
         rts
 
 //////////////////////////////////////////////////////////////////////
 
-// blank screen while adding current frozen cells      
+// set cells off in frozen buffer (in 4 blocks of 250 cells)
+clear_frozen:
+
+        lda #<frozen
+        sta $f9
+        lda #>frozen
+        sta $fa        
+        ldx #0
+!xloop4:        
+        ldy #0                
+!yloop250:
+        lda #0 // cell off
+        sta ($f9),y
+        iny
+        cpy #250
+        bne !yloop250-
+        // switch to next block of 250 cells        
+        lda $f9           // frozen pointer += 250
+        sta var_add0
+        lda $fa
+        sta var_add0+1
+        lda #250
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr add2
+        lda var_add2
+        sta $f9
+        lda var_add2+1
+        sta $fa                
+        inx
+        cpx #4
+        bne !xloop4-
+        rts
+                
+//////////////////////////////////////////////////////////////////////
+
+// redraw video while adding current frozen cells (in 4 blocks of 250 cells)        
 redraw_screen:  
+
         lda $f7 // copy video ptr to working ptr
         sta $b0
         lda $f8
@@ -358,6 +399,7 @@ cell_on:
       acc=bool
 */
 can_move:       
+
         ldx pos         // pos_ahead is the queried possible next position
         ldy pos+1
         stx pos_ahead
@@ -392,6 +434,9 @@ test_rotate:
         ldy #1 // use state_ahead
         jsr update_piece_data_pointer        
 !continue:        
+
+        // jump to video location: base_loc + (pos[0] * 40) + pos[1]
+        
         lda $f7         // var_add0 = ($f7)
         sta var_add0    
         lda $f8
@@ -411,6 +456,8 @@ test_rotate:
         lda var_add3+1
         sta $b1
 
+        // jump to frozen location: base_loc + (pos[0] * 40) + pos[1]
+                
         lda #<frozen
         sta var_add0    
         lda #>frozen
@@ -429,6 +476,7 @@ test_rotate:
         sta $f9
         lda var_add3+1
         sta $fa
+
         lda #0
         sta z   // 0 to 15 (x * 4 + y)
         ldx #0    // 0 to 3
@@ -487,9 +535,9 @@ test_rotate:
         inx
         cpx #4        
         bne !row_x-        
-        lda #1     // no collision found
         ldy #0     // restore normal state ptr
         jsr update_piece_data_pointer
+        lda #1     // no collision found
         rts
 
 //////////////////////////////////////////////////////////////////////
@@ -497,6 +545,7 @@ test_rotate:
 // make $fd point to piece data (with respect to piece and state vars)
 // y: 0=use state, 1=use state_ahead
 update_piece_data_pointer:      
+
         lda $fb
         sta $fd
         lda $fc
@@ -529,7 +578,10 @@ update_piece_data_pointer:
 
 // transfer a piece to the frozen buffer              
 freeze_piece:
-        lda #<frozen // compute corresponding position in frozen buffer
+
+        // jump to frozen location: base_loc + (pos[0] * 40) + pos[1]
+        
+        lda #<frozen 
         sta var_add0
         lda #>frozen
         sta var_add0+1
@@ -547,6 +599,7 @@ freeze_piece:
         sta $f9         // working ptr (will be incremented)
         lda var_add3+1
         sta $fa                
+
         lda #0
         sta z   // 0 to 15 (i * 4 + j)
         ldx #0  // 0 to 3
@@ -560,7 +613,7 @@ freeze_piece:
         beq !cell_off+
         pla // pop y back
         tay        
-        lda #160
+        lda #1 // cell on
         sta ($f9),y
         jmp !continue+
 !cell_off:
@@ -571,7 +624,7 @@ freeze_piece:
         iny
         cpy #4        
         bne !col_y-
-        lda $f9        // += 40 (i.e. go to next line)
+        lda $f9        // loc += 40 (i.e. go to next line)
         sta var_add0
         lda $fa
         sta var_add0+1
@@ -739,10 +792,35 @@ pick_random_piece:
         stx $fb
         sty $fc        
         rts
+
+//////////////////////////////////////////////////////////////////////
+
+// With the value reached by $f9 (ptr in frozen buffer) in the last
+// call to can_move, we know where the last piece was set; if it's
+// less than a certain value, we know we are too high in the grid, and
+// can thus set the game over flag (which will simply restart the game)
+is_game_over:
+
+        lda $fa  // hibyte first 
+        cmp #$20
+        bne no
+        lda $f9  // lobyte
+        cmp #$f0
+        bcs no   // if ($fc) is <= $f0 (6 rows from the top): yes
+        lda #1
+        rts
+no:
+        lda #0
+        rts
         
 //////////////////////////////////////////////////////////////////////
-        
+
+// start point        
 main:
+
+        // clear frozen buffer (in case the game is restarting after game over)
+        jsr clear_frozen // clear frozen buffer (in case the game is restarting after game over)
+        
         lda #$00
         sta $f7
         lda #$08
@@ -759,6 +837,11 @@ main:
 
         jsr pick_random_piece
         
+        // reset piece pos and state
+        lda #0
+        sta pos
+        lda #18   // starting pos: row=0, col=18
+        sta pos+1
         lda #0
         sta state
         ldy #0 // use state (i.e. not state_ahead)
@@ -768,8 +851,7 @@ main:
         jsr draw_piece
         jsr flip_page
         
-        // set interrupt handler
-        // taken from: http://codebase64.org/doku.php?id=base:introduction_to_raster_irqs
+        // interrupt handler, taken from: http://codebase64.org/doku.php?id=base:introduction_to_raster_irqs
         sei        //disable maskable IRQs
         lda #$7f
         sta $dc0d  //disable timer interrupts which can be generated by the two CIA chips
@@ -798,39 +880,80 @@ main:
         
 main_loop:
         lda is_falling
-        bne do_fall
+        beq *+5
+        jmp do_fall
         lda check_keyboard
         bne scan_keyboard
         jmp main_loop
+
 scan_keyboard: 
+        // non-debounced keys (A/D)
+        
         lda #$fd // check A key
         sta $dc00
         lda $dc01
         cmp #$fb
-        beq do_left
+        bne *+5
+        jmp do_left
+
         lda #$fb // check D key
         sta $dc00
         lda $dc01
         cmp #$fb
-        bne *+5 // beq do_right
+        bne *+5 // beq do_right is too far!
         jmp do_right
+
+        // debounced keys (W/S)
+                
         lda is_w_key_pressed // is W already pressed?
         bne debounce_w // yes, debounce it
         lda #$fd // no, check it
         sta $dc00
         lda $dc01
         cmp #$fd
-        bne main_loop // not pressed
-        lda #1        // yes, set for debounce
+        bne check_s // not pressed, continue to check_s
+        lda #1        // pressed: set for debounce
         sta is_w_key_pressed        
-        jmp main_loop        
+check_s:        
+        lda is_s_key_pressed // is S already pressed?
+        bne debounce_s // yes, debounce it
+        lda #$fd // no, check it
+        sta $dc00
+        lda $dc01
+        cmp #$df
+        bne main_loop // not pressed, continue
+        lda #3       // pressed: speed up timer1
+        sta timer1+1
+        lda #0
+        sta timer1
+        lda #1        // and set for debounce
+        sta is_s_key_pressed        
+        jmp main_loop                
+
 debounce_w:
         lda #$fd // check for not-W (i.e. W release)
         sta $dc00
         lda $dc01
         cmp #$fd
-        bne do_rotate
-        jmp main_loop        
+        beq *+5
+        jmp do_rotate // W release: rotate
+        jmp main_loop
+
+debounce_s:
+        lda #$fd // check for not-S (i.e. S release)
+        sta $dc00
+        lda $dc01
+        cmp #$df
+        bne *+5        
+        jmp main_loop    // still pressed, continue
+        lda #30
+        sta timer1+1   // S release: timer1 back to slow
+        lda #0
+        sta timer1
+        lda #0        // reset key
+        sta is_s_key_pressed
+        jmp main_loop
+                
 do_fall:
         lda #0
         jsr can_move // can move down?
@@ -842,7 +965,11 @@ do_fall:
         lda #0
         sta is_falling // stop falling
         jmp main_loop        
+
 reached_bottom:
+        jsr is_game_over
+        beq *+5  // if no continue
+        jmp main // if yes, restart game        
         jsr freeze_piece
         jsr clear_rows
         jsr redraw_screen // prepare next page
@@ -857,6 +984,7 @@ reached_bottom:
         lda #0
         sta state
         jmp main_loop        
+
 do_left:
         lda #1
         jsr can_move // move left possible?
@@ -869,6 +997,7 @@ do_left:
         lda #0
         sta check_keyboard       
         jmp main_loop        
+
 do_right:
         lda #2
         jsr can_move // move right possible??
@@ -881,6 +1010,7 @@ do_right:
         lda #0
         sta check_keyboard        
         jmp main_loop
+
 do_rotate:
         lda #3
         jsr can_move // rotation possible?
@@ -902,4 +1032,3 @@ do_rotate:
         lda #0        // reset key
         sta is_w_key_pressed
         jmp main_loop
-        
