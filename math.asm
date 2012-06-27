@@ -25,9 +25,7 @@ skip:   ror
 end:    txa
 	rts
 
-/*
-   16-bit addition: var_add2 = var_add0 + var_add1
-*/
+// 16-bit addition: var_add2 = var_add0 + var_add1
 add2:
         clc
         lda var_add0
@@ -38,9 +36,7 @@ add2:
         sta var_add2+1
         rts
         
-/*
-   16-bit addition: var_add3 = var_add0 + var_add1 + var_add2
-*/
+// 16-bit addition: var_add3 = var_add0 + var_add1 + var_add2
 add3: 
         // process add1 first 
         clc 
@@ -60,4 +56,12 @@ add3:
         sta var_add3+1 
         rts
         
-        
+sub2:
+        sec		
+	lda var_add0
+	sbc var_add1
+	sta var_add2				
+	lda var_add0+1	
+	sbc var_add1+1
+	sta var_add2+1				
+	rts        

@@ -525,6 +525,7 @@ update_piece_data_pointer:
 
 //////////////////////////////////////////////////////////////////////
 
+// transfer a piece to the frozen buffer              
 freeze_piece:
         lda #<frozen // compute corresponding position in frozen buffer
         sta var_add0
@@ -582,7 +583,44 @@ freeze_piece:
         cmp #4
         bne !row_i-        
         rts
-                
+
+//////////////////////////////////////////////////////////////////////
+
+clear_rows:
+        lda #$7f // start at bottom row
+        sta $fb
+        lda #$23
+        sta $fc
+        ldx #0
+!row_x:        
+        ldy #0 // cols
+!col_y:        
+        lda ($fb),y
+        beq incomplete // hole found, go to next row (above)
+        iny
+        cpy #10
+        bne !col_y-
+complete:
+        inc $d020
+        /* clear */        
+incomplete:
+        lda $fb
+        sta var_add0
+        lda $fc
+        sta var_add0+1
+        lda #40
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr sub2
+        lda var_add2
+        sta $fb
+        lda var_add2+1
+        sta $fc        
+        inx
+        cpx #20
+        bne !row_x-        
+        
 //////////////////////////////////////////////////////////////////////
 
 get_random_number:
@@ -594,7 +632,6 @@ get_random_number:
 //////////////////////////////////////////////////////////////////////
 
 pick_random_piece:
-!search:        
         jsr get_random_number
         and #%00000111
         cmp #%00000000
@@ -634,7 +671,7 @@ pick_random_piece:
         jmp !found+
 !next:        
         cmp #%00000110        
-        bne !search-    // xxxxx111
+        bne pick_random_piece    // xxxxx111
         ldx #<piece_j
         ldy #>piece_j
 !found:        
@@ -746,6 +783,7 @@ do_fall:
         jmp main_loop        
 reached_bottom:
         jsr freeze_piece
+        jsr clear_rows
         jsr redraw_screen // prepare next page
         jsr flip_page
         lda #0
