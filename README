@@ -4,4 +4,6 @@ $ java -jar KickAss.jar tetris.asm [-execute x64]
 
 With the "execute" option, it should autoload/start.
 
+Keyboard controls: WASD
+
 
