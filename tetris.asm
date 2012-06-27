@@ -17,7 +17,7 @@
        'A': left
        'D': right
        'W': rotate
-       ('S' not implemented yet)
+       'S': speed up fall
         
 */        
         
@@ -36,9 +36,10 @@ pos:            .byte 0, 18 // starting pos: top center
 pos_ahead:      .word 0     // lateral move lookahead for collision detection
 state:          .byte 0     // piece rotation lookahead for collision detection
 state_ahead:    .byte 0        
-i:              .byte 0     // 0 to 3
-j:              .byte 0     // 0 to 3
-k:              .byte 0     // i * 4 + j
+z:              .byte 0     /* used to map row/col piece indices to a single value (z = x * 4 + j)
+                               I suspect that there might a clever bitwise way of doing it (that wouldn't
+                               require a variable at all, but for the moment that will dd)
+                            */
 timer1:         .byte 0, 10 // current value, target
 timer2:         .byte 0, 5  // 
 is_falling:     .byte 0     // bool
@@ -109,8 +110,6 @@ check_timer1:
         sta is_falling // set falling animation flag
         lda #0
         sta timer1     // reset animation timer
-        //lda d018_value
-        //sta $d018
         jmp check_timer2
 !wait:
         inc timer1
@@ -196,25 +195,29 @@ draw_piece:
         lda var_add3+1
         sta $b1
         lda #0
-        sta k   // 0 to 15 (i * 4 + j)
-        lda #0
-        sta i   // 0 to 3
-!row_i:        
-        lda #0
-        sta j   // 0 to 3
-!col_j:        
-        ldy k
+        sta z   // 0 to 15 (x * 4 + y)
+        ldx #0  // 0 to 3
+!row_x:        
+        ldy #0  // 0 to 3
+!col_y:
+        tya
+        pha // push y on stack (to let the z var use y)
+        ldy z
         lda ($fd),y   // use tetromino data offset (k)
         beq !cell_off+
-        lda #160
-        ldy j
-        sta ($b0),y   
+        pla // pop y back
+        tay
+        lda #160        
+        sta ($b0),y
+        jmp !continue+                
 !cell_off:
-        inc k
-        inc j
-        lda j
-        cmp #4
-        bne !col_j-
+        pla // pop y back
+        tay
+!continue:                
+        inc z
+        iny
+        cpy #4
+        bne !col_y-
         lda $b0        // += 40 (i.e. go to next line)
         sta var_add0
         lda $b1
@@ -228,10 +231,9 @@ draw_piece:
         sta $b0
         lda var_add2+1
         sta $b1
-        inc i
-        lda i
-        cmp #4
-        bne !row_i-        
+        inx
+        cpx #4
+        bne !row_x-        
         rts
 
 //////////////////////////////////////////////////////////////////////
@@ -427,31 +429,32 @@ test_rotate:
         sta $f9
         lda var_add3+1
         sta $fa
-        
         lda #0
-        sta k   // 0 to 15 (i * 4 + j)
-        lda #0
-        sta i   // 0 to 3
-!row_i:        
-        lda #0
-        sta j   // 0 to 3
-!col_j:        
-        ldy k
-        lda ($fd),y   // use tetromino data offset (k): is there a cell at location?
-        beq !continue+
-        ldy j
-        lda ($f9),y   // and is there also a frozen cell at loc?
-        beq !continue+
-        ldy #0 // restore normal state ptr
+        sta z   // 0 to 15 (x * 4 + y)
+        ldx #0    // 0 to 3
+!row_x:        
+        ldy #0    // 0 to 3        
+!col_y:
+        lda ($f9),y    // is there a frozen cell at loc?
+        beq !continue+ // if not, no collision possible, continue
+        tya
+        pha // push y on stack (to let the z var use y)
+        ldy z
+        lda ($fd),y   // use tetromino data offset (k): is there also a piece cell at location (there's already a frozen cell)?
+        beq !no_piece_coll+ // there's a frozen cell, but no piece cell, so no collision finally: pop y from stack, and continue
+        pla         // clear stack of its item (very important!)
+        ldy #0      // restore normal state ptr
         jsr update_piece_data_pointer
         lda #0
-        rts           // if yes, collision detected, return right away
+        rts         // collision detected, return right away
+!no_piece_coll:
+        pla         // pop y back
+        tay                
 !continue:
-        inc k
-        inc j
-        lda j
-        cmp #4
-        bne !col_j-
+        inc z
+        iny
+        cpy #4
+        bne !col_y-        
 
         lda $b0        // current video ptr += 40 (i.e. go to next line)
         sta var_add0
@@ -481,12 +484,11 @@ test_rotate:
         lda var_add2+1
         sta $fa
         
-        inc i
-        lda i
-        cmp #4
-        bne !row_i-        
-        lda #1        // no collision found
-        ldy #0 // restore normal state ptr
+        inx
+        cpx #4        
+        bne !row_x-        
+        lda #1     // no collision found
+        ldy #0     // restore normal state ptr
         jsr update_piece_data_pointer
         rts
 
@@ -546,25 +548,29 @@ freeze_piece:
         lda var_add3+1
         sta $fa                
         lda #0
-        sta k   // 0 to 15 (i * 4 + j)
-        lda #0
-        sta i   // 0 to 3
-!row_i:        
-        lda #0
-        sta j   // 0 to 3
-!col_j:        
-        ldy k
+        sta z   // 0 to 15 (i * 4 + j)
+        ldx #0  // 0 to 3
+!row_x:        
+        ldy #0  // 0 to 3
+!col_y:
+        tya
+        pha // push y on stack (to let the z var use y)
+        ldy z
         lda ($fd),y   // use tetromino data offset (k)
         beq !cell_off+
+        pla // pop y back
+        tay        
         lda #160
-        ldy j
-        sta ($f9),y   
+        sta ($f9),y
+        jmp !continue+
 !cell_off:
-        inc k
-        inc j
-        lda j
-        cmp #4
-        bne !col_j-
+        pla // pop y back
+        tay
+!continue:        
+        inc z
+        iny
+        cpy #4        
+        bne !col_y-
         lda $f9        // += 40 (i.e. go to next line)
         sta var_add0
         lda $fa
@@ -578,10 +584,9 @@ freeze_piece:
         sta $f9
         lda var_add2+1
         sta $fa
-        inc i
-        lda i
-        cmp #4
-        bne !row_i-        
+        inx
+        cpx #4
+        bne !row_x-        
         rts
 
 //////////////////////////////////////////////////////////////////////
