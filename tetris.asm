@@ -6,11 +6,12 @@
    cjauvin@gmail.com
    http://christianjauv.in
 
-   ZP pointers:
+   ZP pointers (for data structures requiring indirect indexing):
        $f7: start of current video page (flips between $0400 and $0800)
        $f9: working ptr for draw/erase operations (gets incremented from ($f7))
        $fb: buffer of "frozen" cells (outline grid + fixed pieces)
-       $fd: current piece data
+       $fd: current piece data state
+       $b0: current piece data    
 
    Keyboard controls:
        'A': left
@@ -29,7 +30,8 @@ use_page_flipping:
                 .byte 1     // set to 0 to turn off
 is_page_flipping_required:
                 .byte 0
-d018_value:     .byte 0     
+d018_value:     .byte 0
+piece_ptr:      .word 0
 pos:            .byte 0, 18 // starting pos: top center        
 pos_ahead:      .word 0     // lateral move lookahead for collision detection
 state:          .byte 0     // piece rotation lookahead for collision detection
@@ -52,11 +54,36 @@ piece_i:
         .byte 2 // number of states
         .byte 0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0 // |
         .byte 0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0 // -
+piece_s:
+        .byte 2
+        .byte 0,0,0,0,0,0,1,0,0,1,1,0,0,1,0,0
+        .byte 0,0,0,0,0,0,0,0,1,1,0,0,0,1,1,0
+piece_z:
+        .byte 2
+        .byte 0,0,0,0,1,0,0,0,1,1,0,0,0,1,0,0
+        .byte 0,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0
+piece_t:
+        .byte 4
+        .byte 0,1,0,0,1,1,1,0,0,0,0,0,0,0,0,0 
+        .byte 0,1,0,0,0,1,1,0,0,1,0,0,0,0,0,0 
+        .byte 0,0,0,0,1,1,1,0,0,1,0,0,0,0,0,0 
+        .byte 0,1,0,0,1,1,0,0,0,1,0,0,0,0,0,0
 piece_o:        
         .byte 1 
         .byte 0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0
-// ..others soon to come!        
-
+piece_l:
+        .byte 4
+        .byte 0,1,0,0,0,1,0,0,0,1,1,0,0,0,0,0
+        .byte 0,0,0,0,1,1,1,0,1,0,0,0,0,0,0,0
+        .byte 1,1,0,0,0,1,0,0,0,1,0,0,0,0,0,0
+        .byte 0,0,1,0,1,1,1,0,0,0,0,0,0,0,0,0
+piece_j:
+        .byte 4
+        .byte 0,1,0,0,0,1,0,0,1,1,0,0,0,0,0,0
+        .byte 1,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0
+        .byte 0,1,1,0,0,1,0,0,0,1,0,0,0,0,0,0
+        .byte 0,0,0,0,1,1,1,0,0,0,1,0,0,0,0,0
+        
 .import source "math.asm"
 
 //////////////////////////////////////////////////////////////////////
@@ -353,16 +380,15 @@ test_right:
         inc pos_ahead+1
         jmp !continue+
 test_rotate:
-        ldx state_ahead
-        inx
-        cpx piece_i // piece_i is hardcoded for the moment
+        inc state_ahead
+        lda state_ahead
+        ldy #0
+        cmp ($b0),y
         bne !inc_state_ahead+
-        ldx #0
+        sty state_ahead // reset state to 0
 !inc_state_ahead:
-        stx state_ahead
         ldy #1 // use state_ahead
-        jsr update_piece_data_pointer
-        
+        jsr update_piece_data_pointer        
 !continue:        
         lda $f7         // var_add0 = ($f7)
         sta var_add0    
@@ -469,22 +495,20 @@ test_rotate:
 // make $fd point to piece data (with respect to piece and state vars)
 // y: 0=use state, 1=use state_ahead
 update_piece_data_pointer:      
-        lda #<piece_i // piece_i is hardcoded for the moment
+        lda $b0
         sta $fd
-        lda #>piece_i
+        lda $b1
         sta $fe
         lda $fd
         sta var_add0
         lda $fe
         sta var_add0+1
-
         cpy #1
         beq !use_state_ahead+
         lda state
         jmp !continue+
 !use_state_ahead:
         lda state_ahead
-
 !continue:        
         ldx #16
         jsr mult
@@ -560,6 +584,65 @@ freeze_piece:
         rts
                 
 //////////////////////////////////////////////////////////////////////
+
+get_random_number:
+        lda $d012 
+        eor $dc04 
+        sbc $dc05
+        rts
+
+//////////////////////////////////////////////////////////////////////
+
+pick_random_piece:
+!search:        
+        jsr get_random_number
+        and #%00000111
+        cmp #%00000000
+        bne !next+
+        ldx #<piece_i
+        ldy #>piece_i
+        jmp !found+
+!next:        
+        cmp #%00000001
+        bne !next+
+        ldx #<piece_s
+        ldy #>piece_s
+        jmp !found+
+!next:        
+        cmp #%00000010        
+        bne !next+
+        ldx #<piece_z
+        ldy #>piece_z
+        jmp !found+
+!next:        
+        cmp #%00000011        
+        bne !next+
+        ldx #<piece_t
+        ldy #>piece_t
+        jmp !found+
+!next:        
+        cmp #%00000100        
+        bne !next+
+        ldx #<piece_o
+        ldy #>piece_o
+        jmp !found+
+!next:        
+        cmp #%00000101        
+        bne !next+
+        ldx #<piece_l
+        ldy #>piece_l
+        jmp !found+
+!next:        
+        cmp #%00000110        
+        bne !search-    // xxxxx111
+        ldx #<piece_j
+        ldy #>piece_j
+!found:        
+        stx $b0
+        sty $b1        
+        rts
+        
+//////////////////////////////////////////////////////////////////////
         
 main:
         lda #$00
@@ -575,7 +658,9 @@ main:
         jsr redraw_screen // clear page 0 (that's the one we're first pointing to)
 
         jsr init_grid_outline
-                        
+
+        jsr pick_random_piece
+        
         lda #0
         sta state
         ldy #0 // use state (i.e. not state_ahead)
@@ -629,7 +714,8 @@ scan_keyboard:
         sta $dc00
         lda $dc01
         cmp #$fb
-        beq do_right
+        bne *+5 // beq do_right
+        jmp do_right
         lda is_w_key_pressed // is W already pressed?
         bne debounce_w // yes, debounce it
         lda #$fd // no, check it
@@ -664,6 +750,7 @@ reached_bottom:
         jsr flip_page
         lda #0
         sta is_falling // stop falling
+        jsr pick_random_piece
         lda #0
         sta pos
         lda #18
@@ -699,15 +786,14 @@ do_rotate:
         lda #3
         jsr can_move // rotation possible?
         beq !continue+        
-        ldx state
-        inx
-        cpx piece_i // piece_i is hardcoded for the moment
+        inc state
+        lda state
+        ldy #0
+        cmp ($b0),y        
         bne !inc_state+
-        ldx #0
+        sty state // reset state to 0
 !inc_state:
-        stx state
-        ldy #0 // use state
-        jsr update_piece_data_pointer                        
+        jsr update_piece_data_pointer // with y still 0 -> use state
         jsr redraw_screen // prepare next page
         jsr draw_piece
         jsr flip_page
