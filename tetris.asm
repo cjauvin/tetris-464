@@ -61,7 +61,7 @@ is_s_key_pressed:
                 .byte 0     // idem
 grid_outline_color:
                 .byte 15    // light grey
-// tetromino data        
+// piece data (tetrominos)
 piece_i:        
         .byte 2 // number of states
         .byte 3 // color
@@ -241,7 +241,7 @@ draw_piece:
         tya
         pha // push y on stack (to let the z var use y)
         ldy z
-        lda ($fd),y   // use tetromino data offset (k)
+        lda ($fd),y   // use piece data offset (k)
         beq !cell_off+
         pla // pop y back
         tay
@@ -681,7 +681,7 @@ freeze_piece:
         tya
         pha // push y on stack (to let the z var use y)
         ldy z
-        lda ($fd),y   // use tetromino data offset (k)
+        lda ($fd),y   // use piece data offset (k)
         beq !cell_off+
         pla // pop y back
         tay        
