@@ -24,7 +24,8 @@
         $f9: buffer of "frozen" cells (outline grid + fixed pieces)
         $fb: current piece data    
         $fd: current piece data state
-        $b0: helper ptr        
+        $b0: multi-purpose helper ptr1        
+        $b2: multi-purpose helper ptr2       
 */        
         
 :BasicUpstart2(main) // autostart macro
@@ -40,13 +41,14 @@ d018_value:     .byte 0
 pos:            .word 0       // lowbyte: row (0 to 24), hibyte: col (0 to 39)
 pos_ahead:      .word 0       // lateral move lookahead for collision detection
 state:          .byte 0       // piece rotation lookahead for collision detection
-state_ahead:    .byte 0        
+state_ahead:    .byte 0
+color:          .byte 0        
 z:              .byte 0       /* used to map row/col piece indices to a single value (z = x * 4 + j)
                                  I suspect that there might a clever bitwise way of doing it (that wouldn't
                                  require a variable at all, but for the moment that will dd)
                               */
 timer1:         .byte 0, 30   // falling animation (current value, target)
-timer2:         .byte 0, 5    // keyboard check (idem)
+timer2:         .byte 0, 8    // keyboard check (idem)
 is_falling:     .byte 0       // bool
 check_keyboard: .byte 0       // bool
 var_add0:       .word 0       // used by math.asm add2 and add3 
@@ -57,36 +59,45 @@ is_w_key_pressed:
                 .byte 0     // bool, to debounce
 is_s_key_pressed:
                 .byte 0     // idem
+grid_outline_color:
+                .byte 15    // light grey
 // tetromino data        
 piece_i:        
         .byte 2 // number of states
+        .byte 3 // color
         .byte 0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0 // |
         .byte 0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0 // -
 piece_s:
         .byte 2
+        .byte 4
         .byte 0,0,0,0,0,0,1,0,0,1,1,0,0,1,0,0
         .byte 0,0,0,0,0,0,0,0,1,1,0,0,0,1,1,0
 piece_z:
         .byte 2
+        .byte 5
         .byte 0,0,0,0,1,0,0,0,1,1,0,0,0,1,0,0
         .byte 0,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0
 piece_t:
         .byte 4
+        .byte 6
         .byte 0,1,0,0,1,1,1,0,0,0,0,0,0,0,0,0 
         .byte 0,1,0,0,0,1,1,0,0,1,0,0,0,0,0,0 
         .byte 0,0,0,0,1,1,1,0,0,1,0,0,0,0,0,0 
         .byte 0,1,0,0,1,1,0,0,0,1,0,0,0,0,0,0
 piece_o:        
-        .byte 1 
+        .byte 1
+        .byte 7
         .byte 0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0
 piece_l:
         .byte 4
+        .byte 8
         .byte 0,1,0,0,0,1,0,0,0,1,1,0,0,0,0,0
         .byte 0,0,0,0,1,1,1,0,1,0,0,0,0,0,0,0
         .byte 1,1,0,0,0,1,0,0,0,1,0,0,0,0,0,0
         .byte 0,0,1,0,1,1,1,0,0,0,0,0,0,0,0,0
 piece_j:
         .byte 4
+        .byte 9
         .byte 0,1,0,0,0,1,0,0,1,1,0,0,0,0,0,0
         .byte 1,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0
         .byte 0,1,1,0,0,1,0,0,0,1,0,0,0,0,0,0
@@ -157,8 +168,6 @@ flip_page:
         and #1
         beq flop
 flip:
-        lda #$00
-        sta $f7
         lda #$08
         sta $f8
         txa
@@ -166,8 +175,6 @@ flip:
         ora #%00010000
         jmp !continue+
 flop:
-        lda #$00
-        sta $f7
         lda #$04
         sta $f8
         txa
@@ -205,6 +212,26 @@ draw_piece:
         sta $b0         // working ptr (will be incremented)
         lda var_add3+1
         sta $b1
+        
+        lda #$00         // color ram ptr
+        sta var_add0    
+        lda #$d8
+        sta var_add0+1        
+        lda pos
+        ldx #40
+        jsr mult
+        stx var_add1  
+        sta var_add1+1  // var_add1 = pos[0] * 40
+        lda pos+1
+        sta var_add2
+        lda #0
+        sta var_add2+1  // var_add2 = pos[1]
+        jsr add3        // var_add3 = var_add0 + var_add1 + var_add2
+        lda var_add3
+        sta $b2         // working ptr (will be incremented)
+        lda var_add3+1
+        sta $b3
+        
         lda #0
         sta z   // 0 to 15 (x * 4 + y)
         ldx #0  // 0 to 3
@@ -220,6 +247,8 @@ draw_piece:
         tay
         lda #160        
         sta ($b0),y
+        lda color
+        sta ($b2),y
         jmp !continue+                
 !cell_off:
         pla // pop y back
@@ -229,6 +258,7 @@ draw_piece:
         iny
         cpy #4
         bne !col_y-
+
         lda $b0        // += 40 (i.e. go to next line)
         sta var_add0
         lda $b1
@@ -242,6 +272,21 @@ draw_piece:
         sta $b0
         lda var_add2+1
         sta $b1
+
+        lda $b2        // += 40 (i.e. go to next line)
+        sta var_add0
+        lda $b3
+        sta var_add0+1
+        lda #40
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr add2
+        lda var_add2
+        sta $b2
+        lda var_add2+1
+        sta $b3
+        
         inx
         cpx #4
         bne !row_x-        
@@ -263,8 +308,18 @@ init_grid_outline_side:
         lda $fa
         adc #00
         sta $fa
+
+        lda $b0
+        adc #40
+        sta $b0
+        lda $b1
+        adc #00
+        sta $b1
+
         lda #1
         sta ($f9),y
+        lda grid_outline_color
+        sta ($b0),y
         inx
         cpx #21
         bne !loop-
@@ -277,6 +332,8 @@ init_grid_outline:
         ldx #0
 !loop:
         sta $23a6,x // frozen + (23 * 40) + 14
+        lda grid_outline_color
+        sta $dba6,x // grey
         inx
         cpx #12
         bne !loop-
@@ -284,13 +341,21 @@ init_grid_outline:
         lda #$36    // 8192 + (1 * 40) + 14
         sta $f9
         lda #$20
-        sta $fa        
+        sta $fa
+        lda #$36    // color ram
+        sta $b0
+        lda #$d8
+        sta $b1        
         jsr init_grid_outline_side        
         // (3) right
         lda #$41    // 8192 + (1 * 40) + 25
         sta $f9
         lda #$20
-        sta $fa        
+        sta $fa
+        lda #$41
+        sta $b0
+        lda #$d8
+        sta $b1        
         jsr init_grid_outline_side
         rts
 
@@ -494,7 +559,7 @@ test_rotate:
         tya
         pha // push y on stack (to let the z var use y)
         ldy z
-        lda ($fd),y   // use tetromino data offset (k): is there also a piece cell at location (there's already a frozen cell)?
+        lda ($fd),y   // use piece data offset (k): is there also a piece cell at location (there's already a frozen cell)?
         beq !no_piece_coll+ // there's a frozen cell, but no piece cell, so no collision finally: pop y from stack, and continue
         pla         // clear stack of its item (very important!)
         ldy #0      // restore normal state ptr
@@ -569,6 +634,7 @@ update_piece_data_pointer:
 !continue:        
         ldx #16
         jsr mult
+        inx
         inx
         stx var_add1
         lda #0
@@ -796,7 +862,10 @@ pick_random_piece:
         ldy #>piece_j
 !found:        
         stx $fb
-        sty $fc        
+        sty $fc
+
+        jsr set_piece_color
+        
         rts
 
 //////////////////////////////////////////////////////////////////////
@@ -818,12 +887,26 @@ is_game_over:
 no:
         lda #0
         rts
+
+//////////////////////////////////////////////////////////////////////
+
+set_piece_color:
+
+        ldy #1
+        lda ($fb),y
+        sta color
+        rts
         
 //////////////////////////////////////////////////////////////////////
 
 // start point        
 main:
 
+        lda #11
+        sta $d020
+        //lda #12
+        sta $d021 // screen colors
+                
         // clear frozen buffer (in case the game is restarting after game over)
         jsr clear_frozen // clear frozen buffer (in case the game is restarting after game over)
         
