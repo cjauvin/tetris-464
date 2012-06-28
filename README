@@ -1,9 +1,8 @@
-Run with KickAssembler (http://theweb.dk/KickAssembler), and optionally with x64 (from the VICE emu suite):
+Assemble into a ".prg" with KickAssembler (http://theweb.dk/KickAssembler), 
+and optionally run with x64 (from the VICE emu suite):
 
 $ java -jar KickAss.jar tetris.asm [-execute x64]
 
-With the "execute" option, it should autoload/start.
+With the "-execute" option, it should autoload/start.
 
 Keyboard controls: WASD
-
-

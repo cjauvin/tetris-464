@@ -1,49 +1,55 @@
 /*
-   tetris.asm (C=64 + KickAssembler)
-   =================================
-   Christian Jauvin
-   June 2012
-   cjauvin@gmail.com
-   http://christianjauv.in
+    tetris.asm (C=64)
+    =================
+    Christian Jauvin
+    June 2012
+    cjauvin@gmail.com
+    http://christianjauv.in
 
-   ZP pointers (for data structures requiring indirect indexing):
-       $f7: start of current video page (flips between $0400 and $0800)
-       $f9: buffer of "frozen" cells (outline grid + fixed pieces)
-       $fb: current piece data    
-       $fd: current piece data state
-       $b0: helper ptr 
+    Assemble into a ".prg" with KickAssembler (http://theweb.dk/KickAssembler),
+    and optionally run with x64 (from the VICE emu suite):
+    
+    $ java -jar KickAss.jar tetris.asm [-execute x64]
 
-   Keyboard controls:
-       'A': left
-       'D': right
-       'W': rotate
-       'S': speed up fall        
+    With the "-execute" option, it should autoload/start.
+        
+    Keyboard controls:
+        'A': left
+        'D': right
+        'W': rotate
+        'S': speed up fall        
+
+    ZP pointers (for data structures requiring indirect indexing):
+        $f7: start of current video page (flips between $0400 and $0800)
+        $f9: buffer of "frozen" cells (outline grid + fixed pieces)
+        $fb: current piece data    
+        $fd: current piece data state
+        $b0: helper ptr        
 */        
         
 :BasicUpstart2(main) // autostart macro
 
 .pc = $2000 "Variables and data"
-frozen:         .fill 1000, 0 // frozen cells
-page:           .byte 0     // last bit as toggle
+frozen:         .fill 1000, 0 // frozen cells (bools)
+page:           .byte 0       // last bit as toggle
 use_page_flipping:
-                .byte 1     // set to 0 to turn off
+                .byte 1       // set to 0 to turn off
 is_page_flipping_required:
                 .byte 0
 d018_value:     .byte 0
-piece_ptr:      .word 0
-pos:            .word 0     // lobyte: row (0 to 24), hibyte: col (0 to 39)
-pos_ahead:      .word 0     // lateral move lookahead for collision detection
-state:          .byte 0     // piece rotation lookahead for collision detection
+pos:            .word 0       // lowbyte: row (0 to 24), hibyte: col (0 to 39)
+pos_ahead:      .word 0       // lateral move lookahead for collision detection
+state:          .byte 0       // piece rotation lookahead for collision detection
 state_ahead:    .byte 0        
-z:              .byte 0     /* used to map row/col piece indices to a single value (z = x * 4 + j)
-                               I suspect that there might a clever bitwise way of doing it (that wouldn't
-                               require a variable at all, but for the moment that will dd)
-                            */
-timer1:         .byte 0, 30 // current value, target
-timer2:         .byte 0, 3  // 
-is_falling:     .byte 0     // bool
-check_keyboard: .byte 0     // bool
-var_add0:       .word 0     // used by math.asm add2 and add3 
+z:              .byte 0       /* used to map row/col piece indices to a single value (z = x * 4 + j)
+                                 I suspect that there might a clever bitwise way of doing it (that wouldn't
+                                 require a variable at all, but for the moment that will dd)
+                              */
+timer1:         .byte 0, 30   // falling animation (current value, target)
+timer2:         .byte 0, 3    // keyboard check (idem)
+is_falling:     .byte 0       // bool
+check_keyboard: .byte 0       // bool
+var_add0:       .word 0       // used by math.asm add2 and add3 
 var_add1:       .word 0  
 var_add2:       .word 0 
 var_add3:       .word 0
@@ -804,9 +810,9 @@ is_game_over:
         lda $fa  // hibyte first 
         cmp #$20
         bne no
-        lda $f9  // lobyte
+        lda $f9  // lowbyte
         cmp #$f0
-        bcs no   // if ($fc) is <= $f0 (6 rows from the top): yes
+        bcs no   // if ($fc) is <= $f0 (6 rows from the top): game over
         lda #1
         rts
 no:
