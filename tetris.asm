@@ -864,7 +864,11 @@ pick_random_piece:
         stx $fb
         sty $fc
 
-        jsr set_piece_color
+        // set_piece_color
+        ldy #1
+        lda ($fb),y
+        sta color
+        rts
         
         rts
 
@@ -886,15 +890,6 @@ is_game_over:
         rts
 no:
         lda #0
-        rts
-
-//////////////////////////////////////////////////////////////////////
-
-set_piece_color:
-
-        ldy #1
-        lda ($fb),y
-        sta color
         rts
         
 //////////////////////////////////////////////////////////////////////
