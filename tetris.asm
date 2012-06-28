@@ -46,7 +46,7 @@ z:              .byte 0       /* used to map row/col piece indices to a single v
                                  require a variable at all, but for the moment that will dd)
                               */
 timer1:         .byte 0, 30   // falling animation (current value, target)
-timer2:         .byte 0, 3    // keyboard check (idem)
+timer2:         .byte 0, 5    // keyboard check (idem)
 is_falling:     .byte 0       // bool
 check_keyboard: .byte 0       // bool
 var_add0:       .word 0       // used by math.asm add2 and add3 
