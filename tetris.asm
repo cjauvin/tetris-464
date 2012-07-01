@@ -33,7 +33,6 @@
 
 .pc = $2000 "Variables and data"
 frozen:         .fill 1000, 0 // frozen cells (bools)
-page:           .byte 0       // last bit as toggle
 use_page_flipping:
                 .byte 1       // set to 0 to turn off
 is_page_flipping_required:
@@ -165,14 +164,13 @@ flip_page:
         rts
 !continue:        
         lda $f8
-        eor #%00001100
-        sta $f8        
+        eor #%00001100 // flip video addr hibyte between $04 and $08 
+        sta $f8        // (the lowbyte stays $00)
         lda $d018
-        eor #%00110000
-        sta d018_value
+        eor #%00110000 // flip the $d018 video ptr value, but don't set it 
+        sta d018_value // right away: wait until until in the irq 
         lda #1
-        sta is_page_flipping_required // wait until until in the irq to commit the change to $d018
-        inc page
+        sta is_page_flipping_required 
         rts
         
 //////////////////////////////////////////////////////////////////////
