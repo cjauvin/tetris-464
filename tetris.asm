@@ -26,6 +26,7 @@
         $fd: current piece data state
         $b0: multi-purpose helper ptr1        
         $b2: multi-purpose helper ptr2       
+        $b4: multi-purpose helper ptr3
 */        
         
 :BasicUpstart2(main) // autostart macro
@@ -64,40 +65,40 @@ grid_outline_color:
 // piece data (tetrominos)
 piece_i:        
         .byte 2 // number of states
-        .byte 3 // color
+        .byte 2 // color
         .byte 0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0 // |
         .byte 0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0 // -
 piece_s:
         .byte 2
-        .byte 4
+        .byte 3
         .byte 0,0,0,0,0,0,1,0,0,1,1,0,0,1,0,0
         .byte 0,0,0,0,0,0,0,0,1,1,0,0,0,1,1,0
 piece_z:
         .byte 2
-        .byte 5
+        .byte 4
         .byte 0,0,0,0,1,0,0,0,1,1,0,0,0,1,0,0
         .byte 0,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0
 piece_t:
         .byte 4
-        .byte 6
+        .byte 5
         .byte 0,1,0,0,1,1,1,0,0,0,0,0,0,0,0,0 
         .byte 0,1,0,0,0,1,1,0,0,1,0,0,0,0,0,0 
         .byte 0,0,0,0,1,1,1,0,0,1,0,0,0,0,0,0 
         .byte 0,1,0,0,1,1,0,0,0,1,0,0,0,0,0,0
 piece_o:        
         .byte 1
-        .byte 7
+        .byte 6
         .byte 0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0
 piece_l:
         .byte 4
-        .byte 8
+        .byte 7
         .byte 0,1,0,0,0,1,0,0,0,1,1,0,0,0,0,0
         .byte 0,0,0,0,1,1,1,0,1,0,0,0,0,0,0,0
         .byte 1,1,0,0,0,1,0,0,0,1,0,0,0,0,0,0
         .byte 0,0,1,0,1,1,1,0,0,0,0,0,0,0,0,0
 piece_j:
         .byte 4
-        .byte 9
+        .byte 8
         .byte 0,1,0,0,0,1,0,0,1,1,0,0,0,0,0,0
         .byte 1,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0
         .byte 0,1,1,0,0,1,0,0,0,1,0,0,0,0,0,0
@@ -162,25 +163,12 @@ flip_page:
         lda use_page_flipping
         bne !continue+
         rts
-!continue:                
-        ldx $d018
-        lda page
-        and #1
-        beq flop
-flip:
-        lda #$08
-        sta $f8
-        txa
-        and #%00001111
-        ora #%00010000
-        jmp !continue+
-flop:
-        lda #$04
-        sta $f8
-        txa
-        and #%00001111
-        ora #%00100000
-!continue:
+!continue:        
+        lda $f8
+        eor #%00001100
+        sta $f8        
+        lda $d018
+        eor #%00110000
         sta d018_value
         lda #1
         sta is_page_flipping_required // wait until until in the irq to commit the change to $d018
@@ -213,7 +201,7 @@ draw_piece:
         lda var_add3+1
         sta $b1
         
-        lda #$00         // color ram ptr
+        lda #$00         // ptr to start of color ram
         sta var_add0    
         lda #$d8
         sta var_add0+1        
@@ -716,8 +704,11 @@ freeze_piece:
 
 //////////////////////////////////////////////////////////////////////
 
-// $f9 -= #40        
-shift_frozen_ptr_to_row_above:
+// (1) $f9/$b0: frozen curr / frozen 1r above
+// (2) $b2/$b4: color curr / color 1r above
+        
+// $f9/$b2 -= #40        
+shift_curr_ptrs_to_row_above:
         lda $f9
         sta var_add0
         lda $fa
@@ -731,10 +722,23 @@ shift_frozen_ptr_to_row_above:
         sta $f9
         lda var_add2+1
         sta $fa        
+        lda $b2
+        sta var_add0
+        lda $b3
+        sta var_add0+1
+        lda #40
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr sub2
+        lda var_add2
+        sta $b2
+        lda var_add2+1
+        sta $b3        
         rts
 
-// $b0 -= #40        
-shift_frozen_helper_ptr_to_row_above:
+// $b0/$b4 -= #40        
+shift_1ra_ptrs_to_row_above:
         lda $b0
         sta var_add0
         lda $b1
@@ -748,6 +752,19 @@ shift_frozen_helper_ptr_to_row_above:
         sta $b0
         lda var_add2+1
         sta $b1        
+        lda $b4
+        sta var_add0
+        lda $b5
+        sta var_add0+1
+        lda #40
+        sta var_add1
+        lda #0
+        sta var_add1+1
+        jsr sub2
+        lda var_add2
+        sta $b4
+        lda var_add2+1
+        sta $b5        
         rts
         
 // x is already set at proper value (row at which to begin the collapse)
@@ -756,17 +773,23 @@ collapse:
         sta $b0
         lda $fa
         sta $b1
-        jsr shift_frozen_helper_ptr_to_row_above                
+        lda $b2
+        sta $b4
+        lda $b3
+        sta $b5
+        jsr shift_1ra_ptrs_to_row_above                
 !row_x:
         ldy #0
 !col_y:
         lda ($b0),y // get what's one row above
         sta ($f9),y // and copy it to current row        
+        lda ($b4),y // same for color
+        sta ($b2),y
         iny
         cpy #10
         bne !col_y-
-        jsr shift_frozen_ptr_to_row_above
-        jsr shift_frozen_helper_ptr_to_row_above                
+        jsr shift_curr_ptrs_to_row_above
+        jsr shift_1ra_ptrs_to_row_above                
         inx
         cpx #20
         bne !row_x-                
@@ -777,6 +800,11 @@ clear_rows:
         sta $f9
         lda #$23
         sta $fa
+        lda #$7f // idem for color ram: $d800 + (22 * 40) + 15
+        sta $b2
+        lda #$db
+        sta $b3
+        
         ldx #0
 !row_x:        
         ldy #0 // cols
@@ -791,7 +819,7 @@ complete:
         jsr collapse
         jmp clear_rows // we possibly need to redo it up to 4 times
 incomplete:
-        jsr shift_frozen_ptr_to_row_above
+        jsr shift_curr_ptrs_to_row_above
         inx
         cpx #20
         bne !row_x-
@@ -809,15 +837,6 @@ get_random_number:
 
 pick_random_piece:
 
-        // uncomment to always get piece_i
-/*        
-        ldx #<piece_i
-        ldy #>piece_i
-        stx $fb
-        sty $fc        
-        rts
-*/        
-        
         jsr get_random_number
         and #%00000111
         cmp #%00000000
@@ -866,10 +885,9 @@ pick_random_piece:
 
         // set_piece_color
         ldy #1
-        lda ($fb),y
+        lda ($fb),y // to change: 4
+        //lda #13
         sta color
-        rts
-        
         rts
 
 //////////////////////////////////////////////////////////////////////
@@ -897,9 +915,8 @@ no:
 // start point        
 main:
 
-        lda #11
+        lda #0  
         sta $d020
-        //lda #12
         sta $d021 // screen colors
                 
         // clear frozen buffer (in case the game is restarting after game over)
@@ -907,15 +924,15 @@ main:
         
         lda #$00
         sta $f7
-        lda #$08
+        lda #$04
         sta $f8        
-        jsr redraw_screen // clear page 1
+        jsr redraw_screen // clear page 0
 
         lda #$00
         sta $f7
-        lda #$04
+        lda #$08
         sta $f8        
-        jsr redraw_screen // clear page 0 (that's the one we're first pointing to)
+        jsr redraw_screen // clear page 1 (that's the one we're first pointing to)
 
         jsr init_grid_outline
 
